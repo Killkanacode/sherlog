@@ -1,0 +1,14 @@
+[
+  {
+    "name": "orders_to_inventory",
+    "listen": "0.0.0.0:18003",
+    "upstream": "inventory:8003",
+    "enabled": true
+  },
+  {
+    "name": "orders_to_payments",
+    "listen": "0.0.0.0:18002",
+    "upstream": "payments:8002",
+    "enabled": true
+  }
+]

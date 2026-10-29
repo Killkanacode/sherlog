@@ -1,0 +1,223 @@
+name: sherlog
+
+# Networks:
+#   app  — the shop (system under test) and its data stores
+#   obs  — observability backends (Sherlog reads from here)
+networks:
+  app:
+  obs:
+
+# Config files are mounted as directories (not single files) so edits on the
+# host are picked up on restart.
+
+volumes:
+  pgdata:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+
+x-otel-env: &otel-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_METRIC_EXPORT_INTERVAL: "5000"
+  OTEL_BSP_SCHEDULE_DELAY: "1000"
+  OTEL_BLRP_SCHEDULE_DELAY: "1000"
+  DEPLOY_ENV: demo
+
+x-demo-service: &demo-service
+  restart: unless-stopped
+  mem_limit: 256m
+  networks: [app]
+
+services:
+  # ---------------------------------------------------------------- demo app
+  gateway:
+    <<: *demo-service
+    image: sherlog-demo/gateway:main
+    build:
+      context: ./demo-app
+      args: {SERVICE: gateway, VERSION: main}
+    environment:
+      <<: *otel-env
+      PORT: "8000"
+      INVENTORY_URL: http://inventory:8003
+      ORDERS_URL: http://orders:8001
+    ports: ["127.0.0.1:${GATEWAY_HOST_PORT:-8000}:8000"]
+    depends_on:
+      orders: {condition: service_healthy}
+      inventory: {condition: service_healthy}
+
+  orders:
+    <<: *demo-service
+    image: sherlog-demo/orders:main
+    build:
+      context: ./demo-app
+      args: {SERVICE: orders, VERSION: main}
+    environment:
+      <<: *otel-env
+      PORT: "8001"
+      DATABASE_URL: postgresql+asyncpg://shop:${POSTGRES_PASSWORD:-shop}@postgres:5432/shop
+      DB_POOL_SIZE: "10"
+      INVENTORY_URL: http://toxiproxy:18003
+      PAYMENTS_URL: http://toxiproxy:18002
+      INVENTORY_TIMEOUT_S: "2.0"
+      PAYMENTS_TIMEOUT_S: "2.0"
+      RETRIES: "2"
+      RETRY_BACKOFF_MS: "100"
+    depends_on:
+      postgres: {condition: service_healthy}
+      toxiproxy: {condition: service_started}
+      inventory: {condition: service_healthy}
+
+  payments:
+    <<: *demo-service
+    image: sherlog-demo/payments:main
+    build:
+      context: ./demo-app
+      args: {SERVICE: payments, VERSION: main}
+    environment:
+      <<: *otel-env
+      PORT: "8002"
+      REDIS_URL: redis://redis:6379/0
+      PROVIDER_LATENCY_MS_MIN: "50"
+      PROVIDER_LATENCY_MS_MAX: "150"
+      PROVIDER_MAX_CONCURRENCY: "16"
+      PROVIDER_PENDING_RATE: "0.1"
+    depends_on:
+      redis: {condition: service_healthy}
+
+  inventory:
+    <<: *demo-service
+    image: sherlog-demo/inventory:main
+    build:
+      context: ./demo-app
+      args: {SERVICE: inventory, VERSION: main}
+    environment:
+      <<: *otel-env
+      PORT: "8003"
+      DATABASE_URL: postgresql+asyncpg://shop:${POSTGRES_PASSWORD:-shop}@postgres:5432/shop
+      DB_POOL_SIZE: "10"
+      REDIS_URL: redis://redis:6379/0
+      CACHE_TTL_S: "30"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    mem_limit: 1g
+    networks: [app]
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shop}
+    command: ["postgres", "-c", "max_connections=200"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.4.12-alpine
+    restart: unless-stopped
+    mem_limit: 128m
+    networks: [app]
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Sits on the orders -> inventory and orders -> payments links so network
+  # faults can be injected between services.
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.13.0
+    restart: unless-stopped
+    mem_limit: 64m
+    networks: [app]
+    command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
+    volumes: ["./chaos:/config:ro"]
+
+  loadgen:
+    image: locustio/locust:2.47.0
+    restart: unless-stopped
+    mem_limit: 256m
+    networks: [app]
+    command:
+      - -f
+      - /mnt/locust/locustfile.py
+      - --headless
+      - --only-summary
+      - --users
+      - "${LOCUST_USERS:-15}"
+      - --spawn-rate
+      - "3"
+      - --host
+      - http://gateway:8000
+    volumes: ["./demo-app/loadgen:/mnt/locust:ro"]
+    depends_on:
+      gateway: {condition: service_healthy}
+
+  # ----------------------------------------------------------- observability
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.164.0
+    restart: unless-stopped
+    mem_limit: 512m
+    networks: [app, obs]
+    command: ["--config=/etc/observability/otel-collector.yaml"]
+    volumes: ["./observability:/etc/observability:ro"]
+    depends_on: [loki, tempo]
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    restart: unless-stopped
+    mem_limit: 768m
+    networks: [obs]
+    command:
+      - --config.file=/etc/observability/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --web.enable-remote-write-receiver
+      - --web.enable-lifecycle
+    ports: ["127.0.0.1:9090:9090"]
+    volumes:
+      - ./observability:/etc/observability:ro
+      - prometheus-data:/prometheus
+
+  loki:
+    image: grafana/loki:3.7.9
+    restart: unless-stopped
+    mem_limit: 768m
+    networks: [obs]
+    command: ["-config.file=/etc/observability/loki.yaml"]
+    ports: ["127.0.0.1:3100:3100"]
+    volumes:
+      - ./observability:/etc/observability:ro
+      - loki-data:/loki
+
+  tempo:
+    image: grafana/tempo:2.10.10
+    restart: unless-stopped
+    mem_limit: 1g
+    networks: [obs]
+    command: ["-config.file=/etc/observability/tempo.yaml"]
+    ports: ["127.0.0.1:3200:3200"]
+    volumes:
+      - ./observability:/etc/observability:ro
+      - tempo-data:/var/tempo
+
+  grafana:
+    image: grafana/grafana:13.2.5
+    profiles: [debug]
+    restart: unless-stopped
+    mem_limit: 256m
+    networks: [obs]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    ports: ["127.0.0.1:3000:3000"]
+    volumes: ["./observability/grafana:/etc/grafana/provisioning/datasources:ro"]

@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Application metrics re-exposed by the OTel collector. honor_labels keeps
+  # job/instance as set from service.name / service.instance.id.
+  - job_name: otel-collector
+    honor_labels: true
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+# Tempo's metrics-generator remote-writes service graph metrics here
+# (requires --web.enable-remote-write-receiver).

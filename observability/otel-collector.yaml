@@ -1,0 +1,53 @@
+# Receives OTLP from the demo services and fans out:
+#   metrics -> Prometheus (scraped from :8889)
+#   logs    -> Loki (native OTLP endpoint)
+#   traces  -> Tempo
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400
+    spike_limit_mib: 100
+  batch:
+    timeout: 1s
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # job/instance already carry service.name/service.instance.id; also expose
+    # service_name and service_version so deploys are visible on every series.
+    resource_constant_labels:
+      included: ["service.name", "service.version", "deployment.environment.name"]
+    without_scope_info: true
+    metric_expiration: 5m
+  otlp_http/loki:
+    endpoint: http://loki:3100/otlp
+  otlp_grpc/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_http/loki]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_grpc/tempo]
