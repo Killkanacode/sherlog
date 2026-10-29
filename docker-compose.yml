@@ -5,11 +5,13 @@ name: sherlog
 #   obs       — observability backends (Sherlog reads from here)
 #   platform  — the deploy platform API, shared with Sherlog
 #   chaos     — fault injection; Sherlog is never attached to it
+#   sherlog   — Sherlog and its own database
 networks:
   app:
   obs:
   platform:
   chaos:
+  sherlog:
 
 # Config files are mounted as directories (not single files) so edits on the
 # host are picked up on restart.
@@ -21,6 +23,7 @@ volumes:
   tempo-data:
   platform-data:
   chaos-data:
+  sherlog-db:
 
 x-otel-env: &otel-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
@@ -168,6 +171,43 @@ services:
     volumes: ["./demo-app/loadgen:/mnt/locust:ro"]
     depends_on:
       gateway: {condition: service_healthy}
+
+  # ------------------------------------------------------------------ sherlog
+  # The agent. It sees only what an SRE would: telemetry (obs), the deploy
+  # platform (platform) and its own database. No Docker socket, no route to
+  # the shop's internals or to the chaos controller.
+  sherlog-api:
+    build: ./agent
+    image: sherlog/agent:dev
+    restart: unless-stopped
+    mem_limit: 512m
+    networks: [obs, platform, sherlog]
+    environment:
+      SHERLOG_DATABASE_URL: postgresql+asyncpg://sherlog:${SHERLOG_DB_PASSWORD:-sherlog}@sherlog-db:5432/sherlog
+      PROMETHEUS_URL: http://prometheus:9090
+      LOKI_URL: http://loki:3100
+      TEMPO_URL: http://tempo:3200
+      PLATFORM_API_URL: http://platform-api:8050
+      SHERLOG_LEARNING_S: ${SHERLOG_LEARNING_S:-600}
+    ports: ["127.0.0.1:8200:8200"]
+    depends_on:
+      sherlog-db: {condition: service_healthy}
+
+  sherlog-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    networks: [sherlog]
+    environment:
+      POSTGRES_DB: sherlog
+      POSTGRES_USER: sherlog
+      POSTGRES_PASSWORD: ${SHERLOG_DB_PASSWORD:-sherlog}
+    volumes: [sherlog-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sherlog -d sherlog"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   # ------------------------------------------------------- platform & chaos
   # Simulated CD platform. Adopts the compose-run demo containers and replaces
