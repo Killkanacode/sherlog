@@ -410,9 +410,9 @@ Fechas en 2026, hora de Ecuador. Cada fase termina con sus criterios de aceptaci
 
 ### Fase 1 — Miércoles 28 oct: observabilidad + platform-api + caos
 - [x] Collector, Prometheus, Loki y Tempo (5.3).
-- [ ] platform-api (5.2): deploy por ref, rollback, restart, scale, flags, config y eventos.
-- [ ] Ramas de bugs de la tabla 5.1.
-- [ ] chaos-controller con todos los tipos de falla y `reset`.
+- [x] platform-api (5.2): deploy por ref, rollback, restart, scale, flags, config y eventos.
+- [x] Ramas de bugs de la tabla 5.1.
+- [x] chaos-controller con todos los tipos de falla y `reset`.
 - **Acepta si:** los 15 escenarios se pueden inyectar a mano y cada uno se ve en la telemetría.
 
 ### Fase 2 — Jueves 29 oct: detección
