@@ -1,11 +1,15 @@
 name: sherlog
 
 # Networks:
-#   app  — the shop (system under test) and its data stores
-#   obs  — observability backends (Sherlog reads from here)
+#   app       — the shop (system under test) and its data stores
+#   obs       — observability backends (Sherlog reads from here)
+#   platform  — the deploy platform API, shared with Sherlog
+#   chaos     — fault injection; Sherlog is never attached to it
 networks:
   app:
   obs:
+  platform:
+  chaos:
 
 # Config files are mounted as directories (not single files) so edits on the
 # host are picked up on restart.
@@ -15,6 +19,7 @@ volumes:
   prometheus-data:
   loki-data:
   tempo-data:
+  platform-data:
 
 x-otel-env: &otel-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
@@ -63,6 +68,7 @@ services:
       PAYMENTS_TIMEOUT_S: "2.0"
       RETRIES: "2"
       RETRY_BACKOFF_MS: "100"
+      FLAGS_URL: http://platform-api:8050/flags
     depends_on:
       postgres: {condition: service_healthy}
       toxiproxy: {condition: service_started}
@@ -137,7 +143,7 @@ services:
     image: ghcr.io/shopify/toxiproxy:2.13.0
     restart: unless-stopped
     mem_limit: 64m
-    networks: [app]
+    networks: [app, chaos]
     command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
     volumes: ["./chaos:/config:ro"]
 
@@ -160,6 +166,28 @@ services:
     volumes: ["./demo-app/loadgen:/mnt/locust:ro"]
     depends_on:
       gateway: {condition: service_healthy}
+
+  # ------------------------------------------------------- platform & chaos
+  # Simulated CD platform. Adopts the compose-run demo containers and replaces
+  # them on deploy / rollback / config changes. Reads git history (read-only)
+  # to build images from commits.
+  platform-api:
+    build: ./platform-api
+    image: sherlog/platform-api:dev
+    restart: unless-stopped
+    mem_limit: 256m
+    networks: [app, platform, chaos]
+    environment:
+      COMPOSE_PROJECT: sherlog
+      SHERLOG_EVENTS_URL: ${SHERLOG_EVENTS_URL:-}
+    ports: ["127.0.0.1:8050:8050"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./.git:/repo.git:ro
+      - platform-data:/data
+    depends_on:
+      gateway: {condition: service_healthy}
+      payments: {condition: service_healthy}
 
   # ----------------------------------------------------------- observability
   otel-collector:
