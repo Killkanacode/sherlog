@@ -1,0 +1,10 @@
+id: 06-orders-db-pool
+title: "Database pool exhausted"
+description: "Orders is reconfigured with a tiny database connection pool."
+inject:
+  - {type: config, service: orders, env: {DB_POOL_SIZE: 2}}
+ground_truth:
+  service: orders
+  category: db_pool_exhaustion
+  acceptable_actions: [config_revert]
+timeouts: {detect_s: 120, resolve_s: 300}

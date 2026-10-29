@@ -1,0 +1,11 @@
+id: 09-cascade-inventory-slow-with-noise
+title: "Cascade with a red herring"
+description: "Inventory DB index dropped; orders times out; gateway returns 5xx. A noisy but harmless payments deploy lands 20 s later."
+inject:
+  - {type: deploy, service: inventory, ref: bug/inventory-drop-index}
+  - {type: deploy, service: payments, ref: noise/payments-deprecation, delay_s: 20}
+ground_truth:
+  service: inventory
+  category: db_slow_query
+  acceptable_actions: [rollback]
+timeouts: {detect_s: 120, resolve_s: 420}

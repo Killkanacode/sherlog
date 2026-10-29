@@ -1,0 +1,11 @@
+id: 10-orders-retry-storm
+title: "Retry storm"
+description: "Orders is retuned with aggressive timeouts, ten retries and no backoff."
+inject:
+  - {type: config, service: orders, env: {RETRIES: 10, RETRY_BACKOFF_MS: 0, PAYMENTS_TIMEOUT_S: 0.05}}
+ground_truth:
+  service: orders
+  category: retry_storm
+  categories_accepted: [retry_storm, config_change]
+  acceptable_actions: [config_revert]
+timeouts: {detect_s: 120, resolve_s: 300}

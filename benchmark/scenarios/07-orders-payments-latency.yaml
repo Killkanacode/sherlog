@@ -1,0 +1,11 @@
+id: 07-orders-payments-latency
+title: "Network latency orders → payments"
+description: "The link from orders to payments gains 2 s of latency."
+inject:
+  - {type: latency, proxy: orders_to_payments, latency_ms: 2000, jitter_ms: 100}
+ground_truth:
+  service: payments
+  services_accepted: [payments, orders]
+  category: network_latency
+  acceptable_actions: [escalate]
+timeouts: {detect_s: 120, resolve_s: 300}

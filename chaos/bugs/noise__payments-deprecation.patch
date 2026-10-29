@@ -1,0 +1,31 @@
+From 4f7ad02854e6f07813b99ca2b7071b12a3197896 Mon Sep 17 00:00:00 2001
+From: Miguel Bustamante Feijoo <miguelbustamantef@gmail.com>
+Date: Thu, 29 Oct 2026 02:09:17 -0500
+Subject: [PATCH] payments: surface provider SDK deprecation notice
+
+The card provider retires authorize() v1 next year; make the notice visible.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JVcxrbLTzduCswWdArkU73
+---
+ demo-app/payments/main.py | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/demo-app/payments/main.py b/demo-app/payments/main.py
+index cf3f501..c42fa83 100644
+--- a/demo-app/payments/main.py
++++ b/demo-app/payments/main.py
+@@ -54,6 +54,10 @@ async def charge(req: ChargeRequest):
+     if previous:
+         return json.loads(previous)
+ 
++    log.error(
++        "Provider SDK notice: authorize() v1 is deprecated and will be retired on 2027-03-31; "
++        "migrate to authorize_v2()"
++    )
+     result = await provider.authorize(req.amount_cents, req.currency)
+     authorization = result.get("authorization")
+     if authorization is None:
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,10 @@
+id: 14-bad-flag
+title: "Harmful feature flag"
+description: "The new_pricing flag is switched on and checkout starts failing."
+inject:
+  - {type: flag, flag: new_pricing, enabled: true}
+ground_truth:
+  service: orders
+  category: config_change
+  acceptable_actions: [flag_off]
+timeouts: {detect_s: 120, resolve_s: 300}

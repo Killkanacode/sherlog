@@ -1,0 +1,10 @@
+id: 04-payments-none-deploy
+title: "Bad deploy: unchecked None in payments"
+description: "Payments stops handling charges that come back without an authorization."
+inject:
+  - {type: deploy, service: payments, ref: bug/payments-none}
+ground_truth:
+  service: payments
+  category: bad_deploy_code_bug
+  acceptable_actions: [rollback, open_fix_pr]
+timeouts: {detect_s: 120, resolve_s: 300}

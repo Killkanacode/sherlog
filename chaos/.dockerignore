@@ -1,0 +1,4 @@
+bugs/
+toxiproxy.json
+**/__pycache__
+requirements.in

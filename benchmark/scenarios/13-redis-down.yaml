@@ -1,0 +1,10 @@
+id: 13-redis-down
+title: "Redis down"
+description: "Redis stops. Payments can't check idempotency; inventory loses its cache."
+inject:
+  - {type: stop, service: redis}
+ground_truth:
+  service: redis
+  category: dependency_down
+  acceptable_actions: [restart]
+timeouts: {detect_s: 120, resolve_s: 300}

@@ -1,0 +1,73 @@
+From cb3ce246905013f1ef07197542d2490214bc7231 Mon Sep 17 00:00:00 2001
+From: Miguel Bustamante Feijoo <miguelbustamantef@gmail.com>
+Date: Thu, 29 Oct 2026 02:09:16 -0500
+Subject: [PATCH] inventory: serve catalog pages from in-process windows
+
+Keep recently read catalog windows in memory to skip the Redis round trip on list pages.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JVcxrbLTzduCswWdArkU73
+---
+ demo-app/inventory/main.py | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/demo-app/inventory/main.py b/demo-app/inventory/main.py
+index 9487ae0..43d0ccb 100644
+--- a/demo-app/inventory/main.py
++++ b/demo-app/inventory/main.py
+@@ -2,6 +2,7 @@
+ 
+ import json
+ import logging
++import time
+ import uuid
+ 
+ import redis.asyncio as redis
+@@ -17,6 +18,12 @@ from common.db import create_engine, run_migrations
+ log = logging.getLogger("inventory")
+ 
+ CACHE_TTL_S = env_int("CACHE_TTL_S", 30)
++WINDOW_SIZE = 250
++
++# Process-local catalog windows in front of Redis: list pages are served from
++# memory without a network hop. Each window carries a version stamp so a stale
++# window is never served.
++_catalog_windows: dict[tuple, list[dict]] = {}
+ 
+ engine = create_engine()
+ cache = redis.Redis.from_url(
+@@ -67,8 +74,31 @@ async def check_db() -> None:
+ app = create_app(lifespan=lifespan, health_checks={"postgres": check_db})
+ 
+ 
++async def catalog_window(offset: int) -> list[dict]:
++    key = (offset // WINDOW_SIZE, time.monotonic_ns())
++    if key not in _catalog_windows:
++        async with engine.connect() as conn:
++            rows = await conn.execute(
++                text(
++                    "SELECT sku, name, description, unit_price_cents, stock FROM products "
++                    "ORDER BY id OFFSET :offset LIMIT :size"
++                ),
++                {"offset": offset - offset % WINDOW_SIZE, "size": WINDOW_SIZE},
++            )
++            _catalog_windows[key] = [dict(row._mapping) for row in rows]
++    return _catalog_windows[key]
++
++
+ @app.get("/products")
+ async def list_products(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0, le=10000)):
++    window = await catalog_window(offset)
++    start = offset % WINDOW_SIZE
++    if start + limit <= len(window):
++        items = [
++            {k: product[k] for k in ("sku", "name", "unit_price_cents", "stock")}
++            for product in window[start : start + limit]
++        ]
++        return {"items": items, "limit": limit, "offset": offset}
+     key = f"products:list:{limit}:{offset}"
+     cached = await cache_get(key)
+     if cached is not None:
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,10 @@
+id: 03-orders-keyerror-deploy
+title: "Bad deploy: KeyError in orders"
+description: "A refactor in orders reads a field that doesn't exist; every checkout fails."
+inject:
+  - {type: deploy, service: orders, ref: bug/orders-keyerror}
+ground_truth:
+  service: orders
+  category: bad_deploy_code_bug
+  acceptable_actions: [rollback, open_fix_pr]
+timeouts: {detect_s: 120, resolve_s: 300}

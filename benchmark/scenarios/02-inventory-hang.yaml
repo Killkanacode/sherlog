@@ -1,0 +1,10 @@
+id: 02-inventory-hang
+title: "Inventory silent hang"
+description: "Inventory freezes: no crash, no logs, requests just hang."
+inject:
+  - {type: pause, service: inventory}
+ground_truth:
+  service: inventory
+  category: process_hang
+  acceptable_actions: [restart]
+timeouts: {detect_s: 120, resolve_s: 300}

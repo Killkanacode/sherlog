@@ -1,0 +1,10 @@
+id: 01-payments-crash
+title: "Payments crash"
+description: "The payments process is killed and stays down."
+inject:
+  - {type: kill, service: payments}
+ground_truth:
+  service: payments
+  category: process_crash
+  acceptable_actions: [restart]
+timeouts: {detect_s: 120, resolve_s: 300}

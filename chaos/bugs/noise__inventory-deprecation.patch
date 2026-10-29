@@ -1,0 +1,31 @@
+From eccaad8a86d338e61d3ea79b7bb2757c06254bb9 Mon Sep 17 00:00:00 2001
+From: Miguel Bustamante Feijoo <miguelbustamantef@gmail.com>
+Date: Thu, 29 Oct 2026 02:09:17 -0500
+Subject: [PATCH] inventory: announce stock field deprecation
+
+Log a deprecation notice so client teams migrate before catalog API v3.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JVcxrbLTzduCswWdArkU73
+---
+ demo-app/inventory/main.py | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/demo-app/inventory/main.py b/demo-app/inventory/main.py
+index 9487ae0..6d4ead2 100644
+--- a/demo-app/inventory/main.py
++++ b/demo-app/inventory/main.py
+@@ -69,6 +69,10 @@ app = create_app(lifespan=lifespan, health_checks={"postgres": check_db})
+ 
+ @app.get("/products")
+ async def list_products(limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0, le=10000)):
++    log.error(
++        "DeprecationWarning: field 'stock' in catalog list responses is deprecated and will be "
++        "removed in catalog API v3; use GET /products/{sku} for availability"
++    )
+     key = f"products:list:{limit}:{offset}"
+     cached = await cache_get(key)
+     if cached is not None:
+-- 
+2.50.1 (Apple Git-155)
+

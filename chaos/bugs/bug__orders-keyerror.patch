@@ -1,0 +1,31 @@
+From b0e8922e99933c38156ba8303eabce701a53dd02 Mon Sep 17 00:00:00 2001
+From: Miguel Bustamante Feijoo <miguelbustamantef@gmail.com>
+Date: Thu, 29 Oct 2026 02:09:16 -0500
+Subject: [PATCH] orders: simplify order total helper
+
+Use the shorter field name in the pricing helper.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JVcxrbLTzduCswWdArkU73
+---
+ demo-app/orders/pricing.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/demo-app/orders/pricing.py b/demo-app/orders/pricing.py
+index 184444e..cc2e554 100644
+--- a/demo-app/orders/pricing.py
++++ b/demo-app/orders/pricing.py
+@@ -8,8 +8,8 @@ VOLUME_DISCOUNT_TIERS = ((10, 0.10), (5, 0.05))  # (min units, discount)
+ 
+ 
+ def order_total(lines: list[dict]) -> int:
+-    """Total in cents for reserved lines (each with unit_price in cents)."""
+-    return sum(line["unit_price"] * line["qty"] for line in lines)
++    """Total in cents for reserved lines."""
++    return sum(line["price"] * line["qty"] for line in lines)
+ 
+ 
+ def order_total_volume_discount(lines: list[dict]) -> float:
+-- 
+2.50.1 (Apple Git-155)
+

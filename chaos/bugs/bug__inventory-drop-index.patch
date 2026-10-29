@@ -1,0 +1,25 @@
+From 65284de04b54c3d2c21dbcdb1b6f167971ea0a53 Mon Sep 17 00:00:00 2001
+From: Miguel Bustamante Feijoo <miguelbustamantef@gmail.com>
+Date: Thu, 29 Oct 2026 02:09:16 -0500
+Subject: [PATCH] inventory: drop redundant products index
+
+Stock updates are write-heavy; the secondary index only adds write amplification.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01JVcxrbLTzduCswWdArkU73
+---
+ demo-app/db/inventory/003_drop_redundant_index.sql | 2 ++
+ 1 file changed, 2 insertions(+)
+ create mode 100644 demo-app/db/inventory/003_drop_redundant_index.sql
+
+diff --git a/demo-app/db/inventory/003_drop_redundant_index.sql b/demo-app/db/inventory/003_drop_redundant_index.sql
+new file mode 100644
+index 0000000..b0e0d9e
+--- /dev/null
++++ b/demo-app/db/inventory/003_drop_redundant_index.sql
+@@ -0,0 +1,2 @@
++-- products already has a primary key; drop the extra index to speed up stock writes.
++DROP INDEX IF EXISTS products_sku_idx;
+-- 
+2.50.1 (Apple Git-155)
+

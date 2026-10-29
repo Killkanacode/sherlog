@@ -1,0 +1,10 @@
+id: 05-inventory-slow-query
+title: "Slow query after a migration"
+description: "A migration drops the products sku index; every lookup becomes a full scan."
+inject:
+  - {type: deploy, service: inventory, ref: bug/inventory-drop-index}
+ground_truth:
+  service: inventory
+  category: db_slow_query
+  acceptable_actions: [rollback]
+timeouts: {detect_s: 120, resolve_s: 420}

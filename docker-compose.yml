@@ -20,6 +20,7 @@ volumes:
   loki-data:
   tempo-data:
   platform-data:
+  chaos-data:
 
 x-otel-env: &otel-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
@@ -112,6 +113,7 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     mem_limit: 1g
+    cpus: 2.0
     networks: [app]
     environment:
       POSTGRES_DB: shop
@@ -188,6 +190,25 @@ services:
     depends_on:
       gateway: {condition: service_healthy}
       payments: {condition: service_healthy}
+
+  # Injects faults and keeps the ground truth. Only the chaos network (with
+  # platform-api and toxiproxy) reaches it; Sherlog never does.
+  chaos-controller:
+    build: ./chaos
+    image: sherlog/chaos-controller:dev
+    restart: unless-stopped
+    mem_limit: 256m
+    networks: [chaos]
+    environment:
+      COMPOSE_PROJECT: sherlog
+      PLATFORM_API_URL: http://platform-api:8050
+      TOXIPROXY_URL: http://toxiproxy:8474
+    ports: ["127.0.0.1:8100:8100"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./benchmark/scenarios:/scenarios:ro
+      - chaos-data:/data
+    depends_on: [platform-api, toxiproxy]
 
   # ----------------------------------------------------------- observability
   otel-collector:

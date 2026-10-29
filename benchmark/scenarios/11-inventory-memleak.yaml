@@ -1,0 +1,10 @@
+id: 11-inventory-memleak
+title: "Memory leak"
+description: "An in-process cache in inventory never evicts; the container is eventually OOM-killed."
+inject:
+  - {type: deploy, service: inventory, ref: bug/inventory-memleak}
+ground_truth:
+  service: inventory
+  category: memory_exhaustion
+  acceptable_actions: [rollback]
+timeouts: {detect_s: 420, resolve_s: 600}

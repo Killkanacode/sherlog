@@ -1,0 +1,10 @@
+id: 12-orders-cpu
+title: "CPU exhaustion"
+description: "A new checkout promotion runs a quadratic computation on every order."
+inject:
+  - {type: deploy, service: orders, ref: bug/orders-cpu}
+ground_truth:
+  service: orders
+  category: cpu_exhaustion
+  acceptable_actions: [rollback]
+timeouts: {detect_s: 120, resolve_s: 300}

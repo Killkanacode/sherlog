@@ -1,0 +1,11 @@
+id: 15-noise-plus-payments-bug
+title: "Red herring plus a real bug"
+description: "A loud but harmless inventory deploy, then a real payments bug 20 s later."
+inject:
+  - {type: deploy, service: inventory, ref: noise/inventory-deprecation}
+  - {type: deploy, service: payments, ref: bug/payments-none, delay_s: 20}
+ground_truth:
+  service: payments
+  category: bad_deploy_code_bug
+  acceptable_actions: [rollback, open_fix_pr]
+timeouts: {detect_s: 120, resolve_s: 300}

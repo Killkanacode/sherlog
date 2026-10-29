@@ -1,0 +1,11 @@
+id: 08-orders-inventory-partition
+title: "Network partition orders → inventory"
+description: "Orders can no longer reach inventory; inventory itself is healthy."
+inject:
+  - {type: partition, proxy: orders_to_inventory}
+ground_truth:
+  service: inventory
+  services_accepted: [inventory, orders]
+  category: network_partition
+  acceptable_actions: [escalate]
+timeouts: {detect_s: 120, resolve_s: 300}
