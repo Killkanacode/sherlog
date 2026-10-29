@@ -416,10 +416,10 @@ Fechas en 2026, hora de Ecuador. Cada fase termina con sus criterios de aceptaci
 - **Acepta si:** los 15 escenarios se pueden inyectar a mano y cada uno se ve en la telemetría.
 
 ### Fase 2 — Jueves 29 oct: detección
-- [ ] Clientes de ingesta (5.4.1).
-- [ ] Los 5 detectores (5.4.2) con aprendizaje de línea base.
-- [ ] Gestor de incidentes (5.4.3) y topología desde trazas (5.4.4).
-- [ ] Embudo de evidencia (5.4.5), incluida la heurística de causa raíz.
+- [x] Clientes de ingesta (5.4.1).
+- [x] Los 5 detectores (5.4.2) con aprendizaje de línea base.
+- [x] Gestor de incidentes (5.4.3) y topología desde trazas (5.4.4).
+- [x] Embudo de evidencia (5.4.5), incluida la heurística de causa raíz.
 - **Acepta si:** cada escenario genera exactamente un incidente sin usar LLM, y 10 min sin fallas generan 0–1 falsos positivos.
 
 ### Fase 3 — Viernes 30 oct: modelos de Meta + investigador

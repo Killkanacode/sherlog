@@ -1,0 +1,15 @@
+{
+  "summary": {
+    "detected": 0,
+    "exactly_one_incident": 0,
+    "hint_correct": 0,
+    "scenarios": 0,
+    "median_ttd_s": null,
+    "baseline": {
+      "minutes": 10.0,
+      "false_positives": 0,
+      "incidents": []
+    }
+  },
+  "results": []
+}

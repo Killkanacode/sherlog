@@ -1,0 +1,388 @@
+{
+  "summary": {
+    "detected": 15,
+    "exactly_one_incident": 15,
+    "hint_correct": 14,
+    "scenarios": 15,
+    "median_ttd_s": 20.1,
+    "baseline": null
+  },
+  "results": [
+    {
+      "scenario": "01-payments-crash",
+      "title": "Payments crash",
+      "truth_service": "payments",
+      "truth_category": "process_crash",
+      "detected": true,
+      "ttd_s": 5.3,
+      "incidents": 1,
+      "incident_id": 5,
+      "incident_services": [
+        "payments",
+        "orders",
+        "gateway"
+      ],
+      "signal_types": [
+        "container_down",
+        "log_silence",
+        "metric_anomaly",
+        "new_log_template"
+      ],
+      "hint_service": "payments",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 13153,
+      "evidence_tokens": 2627
+    },
+    {
+      "scenario": "02-inventory-hang",
+      "title": "Inventory silent hang",
+      "truth_service": "inventory",
+      "truth_category": "process_hang",
+      "detected": true,
+      "ttd_s": 7.5,
+      "incidents": 1,
+      "incident_id": 6,
+      "incident_services": [
+        "inventory",
+        "orders",
+        "gateway",
+        "payments"
+      ],
+      "signal_types": [
+        "log_silence",
+        "metric_anomaly",
+        "new_log_template",
+        "not_ready"
+      ],
+      "hint_service": "inventory",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 10318,
+      "evidence_tokens": 3496
+    },
+    {
+      "scenario": "03-orders-keyerror-deploy",
+      "title": "Bad deploy: KeyError in orders",
+      "truth_service": "orders",
+      "truth_category": "bad_deploy_code_bug",
+      "detected": true,
+      "ttd_s": 14.1,
+      "incidents": 1,
+      "incident_id": 7,
+      "incident_services": [
+        "orders",
+        "gateway",
+        "payments"
+      ],
+      "signal_types": [
+        "log_silence",
+        "metric_anomaly",
+        "new_exception",
+        "new_log_template"
+      ],
+      "hint_service": "orders",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 12987,
+      "evidence_tokens": 3630
+    },
+    {
+      "scenario": "04-payments-none-deploy",
+      "title": "Bad deploy: unchecked None in payments",
+      "truth_service": "payments",
+      "truth_category": "bad_deploy_code_bug",
+      "detected": true,
+      "ttd_s": 11.2,
+      "incidents": 1,
+      "incident_id": 8,
+      "incident_services": [
+        "payments",
+        "gateway",
+        "orders"
+      ],
+      "signal_types": [
+        "metric_anomaly",
+        "new_exception",
+        "new_log_template"
+      ],
+      "hint_service": "payments",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 12578,
+      "evidence_tokens": 4962
+    },
+    {
+      "scenario": "05-inventory-slow-query",
+      "title": "Slow query after a migration",
+      "truth_service": "inventory",
+      "truth_category": "db_slow_query",
+      "detected": true,
+      "ttd_s": 16.5,
+      "incidents": 1,
+      "incident_id": 9,
+      "incident_services": [
+        "orders",
+        "gateway",
+        "inventory",
+        "payments"
+      ],
+      "signal_types": [
+        "log_silence",
+        "metric_anomaly",
+        "new_exception",
+        "new_log_template"
+      ],
+      "hint_service": "inventory",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 11438,
+      "evidence_tokens": 9061
+    },
+    {
+      "scenario": "06-orders-db-pool",
+      "title": "Database pool exhausted",
+      "truth_service": "orders",
+      "truth_category": "db_pool_exhaustion",
+      "detected": true,
+      "ttd_s": 49.4,
+      "incidents": 1,
+      "incident_id": 10,
+      "incident_services": [
+        "orders",
+        "gateway"
+      ],
+      "signal_types": [
+        "metric_anomaly"
+      ],
+      "hint_service": "orders",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 13314,
+      "evidence_tokens": 5320
+    },
+    {
+      "scenario": "07-orders-payments-latency",
+      "title": "Network latency orders \u2192 payments",
+      "truth_service": "payments",
+      "truth_category": "network_latency",
+      "detected": true,
+      "ttd_s": 10.9,
+      "incidents": 1,
+      "incident_id": 11,
+      "incident_services": [
+        "orders",
+        "gateway"
+      ],
+      "signal_types": [
+        "metric_anomaly",
+        "new_exception",
+        "new_log_template"
+      ],
+      "hint_service": "orders",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 11545,
+      "evidence_tokens": 7372
+    },
+    {
+      "scenario": "08-orders-inventory-partition",
+      "title": "Network partition orders \u2192 inventory",
+      "truth_service": "inventory",
+      "truth_category": "network_partition",
+      "detected": true,
+      "ttd_s": 29.8,
+      "incidents": 1,
+      "incident_id": 12,
+      "incident_services": [
+        "gateway",
+        "orders",
+        "payments"
+      ],
+      "signal_types": [
+        "log_silence",
+        "metric_anomaly",
+        "new_log_template"
+      ],
+      "hint_service": "orders",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 14377,
+      "evidence_tokens": 6659
+    },
+    {
+      "scenario": "09-cascade-inventory-slow-with-noise",
+      "title": "Cascade with a red herring",
+      "truth_service": "inventory",
+      "truth_category": "db_slow_query",
+      "detected": true,
+      "ttd_s": 21.2,
+      "incidents": 1,
+      "incident_id": 13,
+      "incident_services": [
+        "orders",
+        "gateway",
+        "inventory",
+        "payments"
+      ],
+      "signal_types": [
+        "log_silence",
+        "metric_anomaly",
+        "new_exception",
+        "new_log_template"
+      ],
+      "hint_service": "inventory",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 11628,
+      "evidence_tokens": 8789
+    },
+    {
+      "scenario": "10-orders-retry-storm",
+      "title": "Retry storm",
+      "truth_service": "orders",
+      "truth_category": "retry_storm",
+      "detected": true,
+      "ttd_s": 38.8,
+      "incidents": 1,
+      "incident_id": 14,
+      "incident_services": [
+        "orders",
+        "gateway",
+        "payments"
+      ],
+      "signal_types": [
+        "metric_anomaly",
+        "new_log_template"
+      ],
+      "hint_service": "payments",
+      "hint_correct": false,
+      "truth_in_incident": true,
+      "log_lines": 21025,
+      "evidence_tokens": 7520
+    },
+    {
+      "scenario": "11-inventory-memleak",
+      "title": "Memory leak",
+      "truth_service": "inventory",
+      "truth_category": "memory_exhaustion",
+      "detected": true,
+      "ttd_s": 69.3,
+      "incidents": 1,
+      "incident_id": 15,
+      "incident_services": [
+        "inventory"
+      ],
+      "signal_types": [
+        "metric_anomaly"
+      ],
+      "hint_service": "inventory",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 13621,
+      "evidence_tokens": 2392
+    },
+    {
+      "scenario": "12-orders-cpu",
+      "title": "CPU exhaustion",
+      "truth_service": "orders",
+      "truth_category": "cpu_exhaustion",
+      "detected": true,
+      "ttd_s": 20.1,
+      "incidents": 1,
+      "incident_id": 16,
+      "incident_services": [
+        "orders",
+        "gateway"
+      ],
+      "signal_types": [
+        "metric_anomaly",
+        "new_exception",
+        "new_log_template"
+      ],
+      "hint_service": "orders",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 11065,
+      "evidence_tokens": 6935
+    },
+    {
+      "scenario": "13-redis-down",
+      "title": "Redis down",
+      "truth_service": "redis",
+      "truth_category": "dependency_down",
+      "detected": true,
+      "ttd_s": 5.6,
+      "incidents": 1,
+      "incident_id": 17,
+      "incident_services": [
+        "payments",
+        "orders",
+        "gateway",
+        "inventory",
+        "redis"
+      ],
+      "signal_types": [
+        "container_down",
+        "metric_anomaly",
+        "new_exception",
+        "new_log_template",
+        "not_ready"
+      ],
+      "hint_service": "redis",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 16350,
+      "evidence_tokens": 8500
+    },
+    {
+      "scenario": "14-bad-flag",
+      "title": "Harmful feature flag",
+      "truth_service": "orders",
+      "truth_category": "config_change",
+      "detected": true,
+      "ttd_s": 36.1,
+      "incidents": 1,
+      "incident_id": 18,
+      "incident_services": [
+        "orders",
+        "gateway"
+      ],
+      "signal_types": [
+        "metric_anomaly",
+        "new_log_template"
+      ],
+      "hint_service": "orders",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 14946,
+      "evidence_tokens": 6617
+    },
+    {
+      "scenario": "15-noise-plus-payments-bug",
+      "title": "Red herring plus a real bug",
+      "truth_service": "payments",
+      "truth_category": "bad_deploy_code_bug",
+      "detected": true,
+      "ttd_s": 32.0,
+      "incidents": 1,
+      "incident_id": 19,
+      "incident_services": [
+        "payments",
+        "inventory",
+        "gateway",
+        "orders"
+      ],
+      "signal_types": [
+        "metric_anomaly",
+        "new_exception",
+        "new_log_template"
+      ],
+      "hint_service": "payments",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 14491,
+      "evidence_tokens": 6796
+    }
+  ]
+}

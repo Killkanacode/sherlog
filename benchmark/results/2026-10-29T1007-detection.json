@@ -1,0 +1,37 @@
+{
+  "summary": {
+    "detected": 1,
+    "exactly_one_incident": 1,
+    "hint_correct": 1,
+    "scenarios": 1,
+    "median_ttd_s": 37.2,
+    "baseline": null
+  },
+  "results": [
+    {
+      "scenario": "10-orders-retry-storm",
+      "title": "Retry storm",
+      "truth_service": "orders",
+      "truth_category": "retry_storm",
+      "detected": true,
+      "ttd_s": 37.2,
+      "incidents": 1,
+      "incident_id": 20,
+      "incident_services": [
+        "payments",
+        "orders",
+        "gateway"
+      ],
+      "signal_types": [
+        "log_spike",
+        "metric_anomaly",
+        "new_log_template"
+      ],
+      "hint_service": "orders",
+      "hint_correct": true,
+      "truth_in_incident": true,
+      "log_lines": 21673,
+      "evidence_tokens": 3552
+    }
+  ]
+}
