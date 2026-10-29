@@ -9,5 +9,11 @@ CREATE TABLE IF NOT EXISTS products (
     updated_at       timestamptz NOT NULL DEFAULT now()
 );
 
--- Every reservation and product lookup filters by sku.
-CREATE UNIQUE INDEX IF NOT EXISTS products_sku_idx ON products (sku);
+-- Every reservation and product lookup filters by sku. Runs on every start, so
+-- only take the table lock when the index is actually missing.
+DO $$
+BEGIN
+    IF to_regclass('products_sku_idx') IS NULL THEN
+        CREATE UNIQUE INDEX products_sku_idx ON products (sku);
+    END IF;
+END $$;

@@ -16,5 +16,14 @@ CREATE TABLE IF NOT EXISTS order_items (
     unit_price_cents integer NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS order_items_order_id_idx ON order_items (order_id);
-CREATE INDEX IF NOT EXISTS orders_user_id_idx ON orders (user_id);
+-- This file runs on every start while other replicas serve traffic. CREATE
+-- INDEX locks the table even when the index exists, so check the catalog first.
+DO $$
+BEGIN
+    IF to_regclass('order_items_order_id_idx') IS NULL THEN
+        CREATE INDEX order_items_order_id_idx ON order_items (order_id);
+    END IF;
+    IF to_regclass('orders_user_id_idx') IS NULL THEN
+        CREATE INDEX orders_user_id_idx ON orders (user_id);
+    END IF;
+END $$;

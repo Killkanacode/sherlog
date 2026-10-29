@@ -88,8 +88,8 @@ services:
       <<: *otel-env
       PORT: "8002"
       REDIS_URL: redis://redis:6379/0
-      PROVIDER_LATENCY_MS_MIN: "50"
-      PROVIDER_LATENCY_MS_MAX: "150"
+      PROVIDER_LATENCY_MS_MIN: "200"
+      PROVIDER_LATENCY_MS_MAX: "500"
       PROVIDER_MAX_CONCURRENCY: "16"
       PROVIDER_PENDING_RATE: "0.1"
     depends_on:
@@ -163,7 +163,7 @@ services:
       - --headless
       - --only-summary
       - --users
-      - "${LOCUST_USERS:-15}"
+      - "${LOCUST_USERS:-30}"
       - --spawn-rate
       - "3"
       - --host
@@ -221,7 +221,7 @@ services:
     networks: [app, platform, chaos]
     environment:
       COMPOSE_PROJECT: sherlog
-      SHERLOG_EVENTS_URL: ${SHERLOG_EVENTS_URL:-}
+      SHERLOG_EVENTS_URL: ${SHERLOG_EVENTS_URL:-http://sherlog-api:8200/events}
     ports: ["127.0.0.1:8050:8050"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

@@ -30,7 +30,7 @@ class Settings:
 
     # Incidents
     incident_window_s: int = _int("SHERLOG_INCIDENT_WINDOW_S", 120)
-    resolve_quiet_s: int = _int("SHERLOG_RESOLVE_QUIET_S", 180)
+    resolve_quiet_s: int = _int("SHERLOG_RESOLVE_QUIET_S", 90)
 
 
 settings = Settings()

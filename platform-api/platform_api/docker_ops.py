@@ -202,11 +202,15 @@ def status(service: str) -> list[dict]:
     result = []
     for container in containers_for(service):
         state = container.attrs["State"]
+        status_, health = state["Status"], (state.get("Health") or {}).get("Status")
+        if status_ == "paused":
+            # A frozen process looks like a hung one to a platform: running, failing readiness.
+            status_, health = "running", "unhealthy"
         result.append(
             {
                 "name": container.name,
-                "status": state["Status"],
-                "health": (state.get("Health") or {}).get("Status"),
+                "status": status_,
+                "health": health,
                 "image": container.attrs["Config"]["Image"],
                 "started_at": state.get("StartedAt"),
                 "restart_count": container.attrs.get("RestartCount", 0),

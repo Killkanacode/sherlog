@@ -123,6 +123,10 @@ def adopt_all() -> None:
             continue
         entry = store.services.get(service)
         if entry and entry["history"][-1]["image"] == snap["image"]:
+            at_baseline = len(entry["history"]) == 1 and not entry["env_overrides"]
+            if at_baseline and snap["env"] != entry["spec"]["env"]:
+                log.info("Baseline env of %s changed in compose; updating spec", service)
+                entry["spec"] = snap
             continue
         if entry:
             log.warning("Drift detected for %s (running %s); re-adopting", service, snap["image"])

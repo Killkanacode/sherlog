@@ -87,6 +87,7 @@ class IncidentManager:
     def __init__(self) -> None:
         self.incidents: dict[int, Incident] = {}
         self.unattached: list[Signal] = []  # recent supporting signals with no incident yet
+        self._tasks: set[asyncio.Task] = set()  # keep references so tasks aren't garbage-collected
 
     # ------------------------------------------------------------ lookup
     def open_incidents(self) -> list[Incident]:
@@ -126,7 +127,9 @@ class IncidentManager:
                 self.unattached.remove(pending)
         incident.add_timeline("status", "Incident detected", {"status": "detected"}, now)
         log.info("Opened incident #%d: %s", incident.id, incident.title)
-        asyncio.create_task(self._evidence_later(incident))
+        task = asyncio.create_task(self._evidence_later(incident))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
         return incident
 
     async def on_fired(self, signal: Signal) -> None:

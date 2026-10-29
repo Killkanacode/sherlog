@@ -29,7 +29,7 @@ class Shopper(HttpUser):
     def view_product(self):
         self.client.get(f"/products/{random_sku()}", name="/products/[sku]")
 
-    @task(2)
+    @task(3)
     def checkout(self):
         items = [{"sku": random_sku(), "qty": random.randint(1, 3)} for _ in range(random.randint(1, 3))]
         with self.client.post(
