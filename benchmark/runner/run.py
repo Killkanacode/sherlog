@@ -58,10 +58,14 @@ def log(msg: str) -> None:
 
 
 def wait_quiet() -> bool:
-    """Wait until Sherlog has no open incidents and no active impact signals."""
+    """Wait until Sherlog has learned its baselines and has no open incidents
+    and no active impact signals."""
     deadline = time.monotonic() + QUIET_TIMEOUT_S
     quiet_since = None
     while time.monotonic() < deadline:
+        if call("GET", f"{SHERLOG}/health").get("learning"):
+            time.sleep(5)
+            continue
         open_incidents = call("GET", f"{SHERLOG}/incidents?status=open")
         signals = [s for s in call("GET", f"{SHERLOG}/signals") if s["details"].get("impact", True)]
         if not open_incidents and not signals:

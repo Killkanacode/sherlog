@@ -297,7 +297,7 @@ class LogDetector:
             try:
                 await self._pull(cursor, step_end)
             except Exception as exc:  # noqa: BLE001
-                log.warning("Learning pull failed: %s", exc)
+                log.warning("Learning pull failed: %r", exc)
             for _ in range(BUCKETS_PER_MIN):
                 self._rotate()
             self._close_minute(step_end)

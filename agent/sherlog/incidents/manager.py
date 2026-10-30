@@ -239,6 +239,7 @@ class IncidentManager:
         except Exception as exc:  # noqa: BLE001 - an unreachable model must not take the incident down
             log.exception("Investigation failed for incident #%d", incident.id)
             incident.investigation.update(state="failed", error=f"{type(exc).__name__}: {exc}", finished_at=utcnow().isoformat())
+            incident.status = "detected"  # back to plain detection; resolves when the signals clear
             await emit("investigation_failed", f"Investigation failed: {exc}", {})
             return
         cause = incident.diagnosis["root_cause"]
