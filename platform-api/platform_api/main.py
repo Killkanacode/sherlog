@@ -349,6 +349,14 @@ def scale(req: ScaleRequest):
     return {"service": req.service, "replicas": req.replicas}
 
 
+def env_changes(before: dict, after: dict) -> dict:
+    return {
+        key: {"from": mask(key, before[key]) if key in before else None, "to": mask(key, after[key]) if key in after else None}
+        for key in sorted(set(before) | set(after))
+        if before.get(key) != after.get(key)
+    }
+
+
 def apply_config(service: str, entry: dict, overrides: dict, actor: str, background, revert: bool) -> dict:
     before = effective_env(entry)
     previous_overrides = dict(entry["env_overrides"])
@@ -360,11 +368,7 @@ def apply_config(service: str, entry: dict, overrides: dict, actor: str, backgro
     except DeployError as exc:
         entry["env_overrides"] = previous_overrides
         raise HTTPException(status_code=502, detail=str(exc))
-    changes = {
-        key: {"from": mask(key, before[key]) if key in before else None, "to": mask(key, after[key]) if key in after else None}
-        for key in sorted(set(before) | set(after))
-        if before.get(key) != after.get(key)
-    }
+    changes = env_changes(before, after)
     return emit(
         background,
         "config",
@@ -427,9 +431,10 @@ def restore_baseline(req: ActorRequest, background: BackgroundTasks):
             )
             if not dirty:
                 continue
-            had_overrides = bool(entry["env_overrides"])
+            env_before = effective_env(entry)
             roll_or_fail(service, entry, baseline["image"], entry["spec"]["env"], 1)
             entry.update(env_overrides={}, config_history=[], replicas=1, history=[baseline])
+            reverted = env_changes(env_before, effective_env(entry))
             if current["image"] != baseline["image"]:
                 emit(
                     background,
@@ -443,7 +448,7 @@ def restore_baseline(req: ActorRequest, background: BackgroundTasks):
                     changed_files=changed(current["commit_sha"], baseline["commit_sha"], service),
                     details={"rollback": True},
                 )
-            if had_overrides:
+            if reverted:
                 emit(
                     background,
                     "config",
@@ -451,7 +456,7 @@ def restore_baseline(req: ActorRequest, background: BackgroundTasks):
                     req.actor,
                     from_version=baseline["version"],
                     to_version=baseline["version"],
-                    details={"changes": {}, "revert": True},
+                    details={"changes": reverted, "revert": True},
                 )
             restored.append(service)
     for name, enabled in list(store.flags.items()):
