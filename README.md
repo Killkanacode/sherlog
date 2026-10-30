@@ -34,6 +34,11 @@ docker compose up -d --build
 
 First boot seeds one million products, so give inventory ~30 s to become healthy.
 
+Sherlog's investigator calls Meta's models (`META_*` and `OPEN_MODEL_*` in `.env`).
+Without credentials, set `SHERLOG_FAKE_LLM=true` to run the whole pipeline on
+stand-in models. They exercise the tools and the streaming, but return no real
+diagnosis.
+
 | URL | What |
 |---|---|
 | http://localhost:8000/products | Shop gateway (`GATEWAY_HOST_PORT`) |
@@ -116,6 +121,39 @@ incident and scores it. Results from 2026-10-29 (`benchmark/results/`):
 | Evidence funnel | 10k–21k log lines → 2.4k–9k tokens per incident |
 | Root-cause hint | 14 / 15; the retry storm missed, and after a fix a re-run pointed at the right service |
 
+## Investigation (Meta models)
+
+Once the evidence pack is ready (45 s after an incident opens), two models
+take over:
+
+1. **Triage, on Muse Spark Open.** This is the cheap first pass. For each
+   suspect service it reports what changed, which errors are new and what
+   looks like noise.
+2. **The investigator, on Muse Spark with tool calling.** It states a
+   hypothesis and tests it with ten read-only tools: `query_metrics`,
+   `get_service_health`, `get_traces`, `get_logs`, `get_exception`,
+   `get_code_context` (source at the deployed version), `get_recent_changes`,
+   `diff_deploy`, `get_dependencies` and `search_past_incidents`. It ends with
+   a JSON diagnosis that is validated against a strict schema: root cause
+   (service, category, confidence), evidence, ruled-out hypotheses and a
+   recommended action.
+
+The investigator is bounded by a maximum number of steps, a token budget per
+incident and a timeout per tool. Every hypothesis and tool call is streamed
+over `/stream` and kept in the incident timeline. Each model call is
+accounted for per incident, with tokens, latency and cost. Cost appears once
+prices are configured.
+
+All model-specific code lives in `agent/sherlog/llm/`. Wire-format details
+that haven't been checked against Meta's documentation are marked
+`TODO(VERIFY)`.
+
+```bash
+curl -s localhost:8200/incidents/<id>             # timeline, triage, diagnosis, llm_calls
+curl -s -X POST localhost:8200/incidents/<id>/investigate
+curl -s -X POST localhost:8200/tools/get_dependencies -H 'content-type: application/json' -d '{"service":"orders"}'
+```
+
 ## Built during the hackathon
 
 Everything in this repository was written during the hackathon (Oct 27 – Nov 4, 2026). The git history is the record.
@@ -124,6 +162,7 @@ Everything in this repository was written during the hackathon (Oct 27 – Nov 4
 - Observability pipeline: OTel Collector → Prometheus / Loki / Tempo, with a trace-derived service graph.
 - platform-api (deploys from git commits, rollback, config, flags, change events), chaos-controller with 15 scenarios, and the buggy branches.
 - Sherlog's detection pipeline: metric, log, exception and container detectors, incident grouping, topology, evidence funnel and root-cause hint, plus the detection benchmark.
+- The model layer, triage, the tool-calling investigator with its ten tools, and diagnosis scoring in the benchmark.
 
 ## License
 
