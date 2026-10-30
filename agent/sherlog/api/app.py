@@ -3,19 +3,22 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from sherlog import db
+from sherlog import db, llm
 from sherlog.api.stream import broadcaster
+from sherlog.config import settings
 from sherlog.detectors.containers import container_detector
 from sherlog.detectors.logs import log_detector
 from sherlog.detectors.metrics import metric_detector
 from sherlog.incidents.manager import manager
+from sherlog.investigator import tools
 from sherlog.ingest.clients import platform
-from sherlog.signals import bus
+from sherlog.signals import bus, utcnow
 from sherlog.topology.graph import topology
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -68,7 +71,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "learning": log_detector.learning}
+    return {"status": "ok", "learning": log_detector.learning, "llm": llm.mode(), "investigate": settings.investigate}
 
 
 @app.get("/incidents")
@@ -99,6 +102,36 @@ async def get_incident(incident_id: int):
 @app.post("/incidents/{incident_id}/evidence")
 async def rebuild_evidence(incident_id: int):
     return await manager.refresh_evidence(_incident(incident_id))
+
+
+@app.post("/incidents/{incident_id}/investigate", status_code=202)
+async def start_investigation(incident_id: int):
+    """Run (or re-run) triage and the investigator on an open incident."""
+    incident = _incident(incident_id)
+    if not incident.open:
+        raise HTTPException(status_code=409, detail=f"incident is {incident.status}")
+    if incident.investigating:
+        raise HTTPException(status_code=409, detail="already investigating")
+    manager.spawn(manager.investigate(incident))
+    return {"accepted": True}
+
+
+@app.get("/tools")
+async def list_tools():
+    return tools.specs()
+
+
+@app.post("/tools/{name}")
+async def call_tool(name: str, arguments: dict, incident_id: int | None = None):
+    """Run an investigator tool by hand (debugging, and the UI's evidence panel).
+    Time ranges default to the incident's window, or the last 15 minutes."""
+    incident = manager.incidents.get(incident_id) if incident_id else None
+    start = (
+        datetime.fromisoformat(incident.evidence["window"]["start"])
+        if incident and incident.evidence
+        else utcnow() - timedelta(minutes=15)
+    )
+    return await tools.run_tool(tools.ToolContext(incident_id or 0, start), name, arguments)
 
 
 @app.get("/signals")
@@ -160,6 +193,7 @@ async def stats():
             "log_lines_in_windows": sum(s["log_lines_in_window"] for s in evidence),
             "estimated_tokens": sum(s["estimated_tokens"] for s in evidence),
         },
+        "llm": {"mode": llm.mode(), "by_model": await db.llm_totals()},
     }
 
 

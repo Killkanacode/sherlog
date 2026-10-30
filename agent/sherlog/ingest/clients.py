@@ -103,6 +103,24 @@ class Platform:
         response.raise_for_status()
         return response.json()
 
+    async def history(self, service: str) -> list[dict]:
+        response = await self._http.get(f"/services/{service}/history")
+        response.raise_for_status()
+        return response.json()
+
+    async def source(self, service: str, version: str, path: str) -> str:
+        """A file of the demo app (path under demo-app/) as deployed at `version`."""
+        response = await self._http.get(f"/source/{service}/{version}/{path}")
+        response.raise_for_status()
+        return response.text
+
+    async def diff(self, service: str, from_version: str, to_version: str) -> str:
+        response = await self._http.get(
+            f"/diff/{service}", params={"from_version": from_version, "to_version": to_version}
+        )
+        response.raise_for_status()
+        return response.text
+
 
 prometheus = Prometheus()
 loki = Loki()

@@ -13,11 +13,14 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from sherlog import db
+from sherlog import db, llm
 from sherlog.api.stream import broadcaster
 from sherlog.config import settings
 from sherlog.funnel.builder import build_evidence
 from sherlog.funnel.heuristics import is_impact
+from sherlog.investigator import agent as investigator
+from sherlog.investigator.triage import run_triage
+from sherlog.llm.usage import Usage
 from sherlog.signals import Signal, bus, utcnow
 from sherlog.topology.graph import topology
 
@@ -41,6 +44,17 @@ class Incident:
     resolved_at: datetime | None = None
     last_signal_at: datetime | None = None
     quiet_since: datetime | None = None
+    triage: dict | None = None
+    diagnosis: dict | None = None
+    investigation: dict | None = None  # {"state": running|done|failed, "mode": fake|live, ...}
+    usage: Usage | None = None
+
+    def __post_init__(self) -> None:
+        self.usage = self.usage or Usage(self.id)
+
+    @property
+    def investigating(self) -> bool:
+        return bool(self.investigation and self.investigation["state"] == "running")
 
     @property
     def open(self) -> bool:
@@ -70,6 +84,9 @@ class Incident:
             "active_signals": sum(1 for s in self.signals if s.active),
             "signal_count": len(self.signals),
             "root_cause_hint": (self.evidence or {}).get("root_cause_hint", {}).get("service"),
+            "root_cause": (self.diagnosis or {}).get("root_cause"),
+            "investigation": self.investigation,
+            "llm_usage": self.usage.totals() if self.usage.calls else None,
         }
 
     def data(self) -> dict:
@@ -77,6 +94,9 @@ class Incident:
             "signals": [s.to_dict() for s in self.signals],
             "timeline": self.timeline,
             "evidence": self.evidence,
+            "triage": self.triage,
+            "diagnosis": self.diagnosis,
+            "llm_calls": self.usage.calls,
         }
 
     def to_dict(self) -> dict:
@@ -127,10 +147,13 @@ class IncidentManager:
                 self.unattached.remove(pending)
         incident.add_timeline("status", "Incident detected", {"status": "detected"}, now)
         log.info("Opened incident #%d: %s", incident.id, incident.title)
-        task = asyncio.create_task(self._evidence_later(incident))
+        self.spawn(self._evidence_later(incident))
+        return incident
+
+    def spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
-        return incident
 
     async def on_fired(self, signal: Signal) -> None:
         incident = self._match(signal)
@@ -188,6 +211,49 @@ class IncidentManager:
             await self.refresh_evidence(incident)
         except Exception:
             log.exception("Evidence funnel failed for incident #%d", incident.id)
+            return
+        if settings.investigate and incident.open:
+            await self.investigate(incident)
+
+    async def investigate(self, incident: Incident) -> None:
+        """Triage, then the investigator. Phase 4 acts on the diagnosis; until
+        then the incident stays open until its signals clear."""
+        if incident.investigating:
+            return
+        incident.investigation = {"state": "running", "mode": llm.mode(), "started_at": utcnow().isoformat()}
+        await self.set_status(incident, "investigating", f"Investigation started ({llm.mode()} models)")
+
+        async def emit(kind: str, text: str, data: dict) -> None:
+            incident.add_timeline(kind, text, data)
+            broadcaster.publish("investigation", {"incident_id": incident.id, "kind": kind, "text": text, "data": data})
+            await self.save(incident)
+
+        try:
+            evidence = incident.evidence or await self.refresh_evidence(incident)
+            incident.triage = await run_triage(llm.triage_model(), evidence, incident.usage)
+            if incident.triage:
+                await emit("triage", incident.triage["overview"], incident.triage)
+            incident.diagnosis = await investigator.investigate(
+                llm.investigator_model(), incident.summary(), evidence, incident.triage, incident.usage, emit
+            )
+        except Exception as exc:  # noqa: BLE001 - an unreachable model must not take the incident down
+            log.exception("Investigation failed for incident #%d", incident.id)
+            incident.investigation.update(state="failed", error=f"{type(exc).__name__}: {exc}", finished_at=utcnow().isoformat())
+            await emit("investigation_failed", f"Investigation failed: {exc}", {})
+            return
+        cause = incident.diagnosis["root_cause"]
+        totals = incident.usage.totals()
+        incident.investigation.update(
+            state="done", finished_at=utcnow().isoformat(),
+            steps=sum(1 for c in incident.usage.calls if c["role"] == "investigator"),
+        )
+        cost = f"${totals['cost_usd']:.4f}" if totals["cost_usd"] is not None else "cost unknown"
+        await emit(
+            "diagnosis",
+            f"Root cause: {cause['service']} ({cause['category']}, confidence {cause['confidence']:.2f}). "
+            f"{totals['total_tokens']:,} tokens, {cost}",
+            incident.diagnosis,
+        )
 
     # ------------------------------------------------------------ loops
     async def run(self) -> None:
@@ -210,7 +276,7 @@ class IncidentManager:
             await asyncio.sleep(10)
             now = utcnow()
             for incident in self.open_incidents():
-                if incident.status != "detected":
+                if incident.status not in ("detected", "investigating") or incident.investigating:
                     continue
                 if any(s.active for s in incident.signals):
                     incident.quiet_since = None

@@ -31,6 +31,18 @@ CREATE TABLE IF NOT EXISTS sherlog.change_events (
     data    jsonb       NOT NULL
 );
 CREATE INDEX IF NOT EXISTS change_events_ts_idx ON sherlog.change_events (ts);
+CREATE TABLE IF NOT EXISTS sherlog.llm_calls (
+    id            bigserial   PRIMARY KEY,
+    incident_id   integer     REFERENCES sherlog.incidents (id),
+    ts            timestamptz NOT NULL,
+    role          text        NOT NULL,
+    model         text        NOT NULL,
+    input_tokens  integer     NOT NULL,
+    output_tokens integer     NOT NULL,
+    latency_ms    real        NOT NULL,
+    cost_usd      numeric
+);
+CREATE INDEX IF NOT EXISTS llm_calls_incident_idx ON sherlog.llm_calls (incident_id);
 """
 
 
@@ -110,3 +122,55 @@ async def recent_events(limit: int = 100) -> list[dict]:
             text("SELECT data FROM sherlog.change_events ORDER BY ts DESC LIMIT :limit"), {"limit": limit}
         )
         return [row.data for row in rows][::-1]
+
+
+async def insert_llm_call(incident_id: int | None, call: dict) -> None:
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO sherlog.llm_calls "
+                "(incident_id, ts, role, model, input_tokens, output_tokens, latency_ms, cost_usd) "
+                "VALUES (:incident_id, :ts, :role, :model, :input_tokens, :output_tokens, :latency_ms, :cost_usd)"
+            ),
+            {**call, "incident_id": incident_id, "ts": datetime.fromisoformat(call["ts"])},
+        )
+
+
+async def llm_totals() -> list[dict]:
+    """Calls, tokens and cost per model since the beginning (cost is null if unpriced)."""
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT model, count(*) AS calls, sum(input_tokens) AS input_tokens, "
+                "sum(output_tokens) AS output_tokens, "
+                "CASE WHEN bool_and(cost_usd IS NOT NULL) THEN sum(cost_usd)::float END AS cost_usd "
+                "FROM sherlog.llm_calls GROUP BY model ORDER BY model"
+            )
+        )
+        return [dict(row._mapping) for row in rows]
+
+
+async def search_incidents(
+    exclude_id: int, service: str | None = None, needles: list[str] | None = None, limit: int = 5
+) -> list[dict]:
+    """Earlier incidents on a service, or whose stored data mentions any needle
+    (an exception fingerprint or a log template)."""
+    clauses, params = [], {"exclude": exclude_id, "limit": limit}
+    if service:
+        clauses.append(":service = ANY(services)")
+        params["service"] = service
+    for i, needle in enumerate(needles or []):
+        clauses.append(f"strpos(data::text, :needle{i}) > 0")
+        params[f"needle{i}"] = needle
+    if not clauses:
+        return []
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT id, status, title, services, created_at, resolved_at, "
+                "data -> 'diagnosis' AS diagnosis FROM sherlog.incidents "
+                f"WHERE id <> :exclude AND ({' OR '.join(clauses)}) ORDER BY id DESC LIMIT :limit"
+            ),
+            params,
+        )
+        return [dict(row._mapping) for row in rows]
