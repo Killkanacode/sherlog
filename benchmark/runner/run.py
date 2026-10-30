@@ -1,8 +1,10 @@
 """Benchmark runner.
 
 For each scenario: reset -> wait for a quiet, healthy system -> inject ->
-wait for Sherlog to open an incident -> observe -> score -> reset. A fault-free
-baseline run counts false positives. Results go to benchmark/results/.
+wait for Sherlog to open an incident -> wait for its diagnosis -> score ->
+reset. A fault-free baseline run counts false positives. Results go to
+benchmark/results/. Runs against fake models (SHERLOG_FAKE_LLM) are labelled
+as such: they test the plumbing, not the diagnosis.
 
 Talks to the chaos controller (for ground truth and injection) and to
 Sherlog's public API, like the UI does. Standard library only:
@@ -27,6 +29,8 @@ RESULTS = Path(__file__).resolve().parent.parent / "results"
 QUIET_S = 30  # healthy and incident-free for this long before injecting
 QUIET_TIMEOUT_S = 420
 OBSERVE_AFTER_DETECT_S = 90
+SHERLOG_INVESTIGATES = True  # read from Sherlog's /health at start
+DIAGNOSIS_TIMEOUT_S = 300  # after detection
 
 
 def call(method: str, url: str, body: dict | None = None, timeout: float = 300):
@@ -42,6 +46,11 @@ def now() -> datetime:
 
 def parse(ts: str) -> datetime:
     return datetime.fromisoformat(ts)
+
+
+def median(values: list) -> float | None:
+    values = sorted(v for v in values if v is not None)
+    return values[len(values) // 2] if values else None
 
 
 def log(msg: str) -> None:
@@ -105,9 +114,8 @@ def run_scenario(scenario: dict) -> dict:
         call("POST", f"{CHAOS}/reset")
         return {**result, "incidents": 0}
 
-    time.sleep(OBSERVE_AFTER_DETECT_S)
+    detail = wait_diagnosis(first["id"], detected_at)
     incidents = incidents_since(t0)
-    detail = call("GET", f"{SHERLOG}/incidents/{first['id']}")
     evidence = detail.get("evidence") or call("POST", f"{SHERLOG}/incidents/{first['id']}/evidence")
     hint = (evidence.get("root_cause_hint") or {}).get("service")
     stats = evidence.get("stats", {})
@@ -124,12 +132,62 @@ def run_scenario(scenario: dict) -> dict:
             "evidence_tokens": stats.get("estimated_tokens"),
         }
     )
+    result.update(score_diagnosis(detail, truth, accepted, detected_at))
     log(
         f"{sid}: incident #{first['id']} after {result['ttd_s']}s, {len(incidents)} incident(s), "
         f"services {detail['services']}, hint {hint} ({'ok' if result['hint_correct'] else 'wrong'})"
+        + (f", diagnosis {result['diagnosis_service']}/{result['diagnosis_category']} "
+           f"({'ok' if result['cause_correct'] else 'wrong'})" if result.get("diagnosed") else "")
     )
     call("POST", f"{CHAOS}/reset")
     return result
+
+
+def wait_diagnosis(incident_id: int, detected_at: datetime) -> dict:
+    """Observe for a while (to count duplicate incidents), and until the
+    investigation has finished if Sherlog is investigating."""
+    deadline = time.monotonic() + DIAGNOSIS_TIMEOUT_S
+    observe_until = time.monotonic() + OBSERVE_AFTER_DETECT_S
+    while True:
+        detail = call("GET", f"{SHERLOG}/incidents/{incident_id}")
+        investigation = detail.get("investigation") or {}
+        pending = investigation.get("state") == "running" or (
+            not investigation and detail["status"] in ("detected", "investigating") and SHERLOG_INVESTIGATES
+        )
+        if time.monotonic() >= observe_until and not pending:
+            return detail
+        if time.monotonic() >= deadline:
+            log(f"incident #{incident_id}: no diagnosis within {DIAGNOSIS_TIMEOUT_S}s")
+            return detail
+        time.sleep(3)
+
+
+def score_diagnosis(detail: dict, truth: dict, accepted: set, detected_at: datetime) -> dict:
+    investigation = detail.get("investigation") or {}
+    diagnosis = detail.get("diagnosis")
+    usage = detail.get("llm_usage") or {}
+    if not diagnosis:
+        return {"diagnosed": False, "investigation_state": investigation.get("state")}
+    cause = diagnosis["root_cause"]
+    categories = set(truth.get("categories_accepted", [truth["category"]]))
+    service_ok, category_ok = cause["service"] in accepted, cause["category"] in categories
+    finished = investigation.get("finished_at")
+    return {
+        "diagnosed": True,
+        "investigation_state": investigation.get("state"),
+        "llm_mode": investigation.get("mode"),
+        "diagnosis_service": cause["service"],
+        "diagnosis_category": cause["category"],
+        "confidence": cause["confidence"],
+        "recommended_action": diagnosis["recommended_action"]["type"],
+        "service_correct": service_ok,
+        "category_correct": category_ok,
+        "cause_correct": service_ok and category_ok,
+        "time_to_diagnosis_s": round((parse(finished) - detected_at).total_seconds(), 1) if finished else None,
+        "llm_calls": usage.get("calls"),
+        "llm_tokens": usage.get("total_tokens"),
+        "llm_cost_usd": usage.get("cost_usd"),
+    }
 
 
 def run_baseline(minutes: float) -> dict:
@@ -146,15 +204,19 @@ def run_baseline(minutes: float) -> dict:
 
 def table(results: list[dict]) -> str:
     rows = [
-        "| Scenario | Truth | Detected | TTD (s) | Incidents | Hint | Log lines → tokens |",
-        "|---|---|---|---|---|---|---|",
+        "| Scenario | Truth | Detected | TTD (s) | Incidents | Hint | Diagnosis | LLM tokens | Log lines → tokens |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results:
+        diagnosis = (
+            f"{r['diagnosis_service']} / {r['diagnosis_category']} {'✓' if r['cause_correct'] else '✗'}"
+            if r.get("diagnosed") else "-"
+        )
         rows.append(
             f"| {r['title']} | {r['truth_service']} / {r['truth_category']} | {'yes' if r['detected'] else 'no'} | "
             f"{r['ttd_s'] if r['ttd_s'] is not None else '-'} | {r.get('incidents', 0)} | "
-            f"{r.get('hint_service') or '-'} {'✓' if r.get('hint_correct') else '✗'} | "
-            f"{r.get('log_lines') or '-'} → {r.get('evidence_tokens') or '-'} |"
+            f"{r.get('hint_service') or '-'} {'✓' if r.get('hint_correct') else '✗'} | {diagnosis} | "
+            f"{r.get('llm_tokens') or '-'} | {r.get('log_lines') or '-'} → {r.get('evidence_tokens') or '-'} |"
         )
     return "\n".join(rows)
 
@@ -166,6 +228,12 @@ def main() -> None:
     parser.add_argument("--baseline-only", action="store_true")
     parser.add_argument("--no-baseline", action="store_true")
     args = parser.parse_args()
+
+    global SHERLOG_INVESTIGATES
+    health = call("GET", f"{SHERLOG}/health")
+    llm_mode, SHERLOG_INVESTIGATES = health.get("llm"), health.get("investigate", False)
+    if llm_mode == "fake":
+        log("Sherlog is running FAKE models: diagnoses below test the plumbing, not the reasoning")
 
     results, baseline = [], None
     if not args.baseline_only:
@@ -183,12 +251,27 @@ def main() -> None:
         "exactly_one_incident": sum(r.get("incidents") == 1 for r in results),
         "hint_correct": sum(bool(r.get("hint_correct")) for r in results),
         "scenarios": len(results),
-        "median_ttd_s": sorted(r["ttd_s"] for r in results if r["ttd_s"] is not None)[len([r for r in results if r["ttd_s"] is not None]) // 2]
-        if any(r["ttd_s"] is not None for r in results) else None,
+        "median_ttd_s": median([r["ttd_s"] for r in results]),
         "baseline": baseline,
     }
+    diagnosed = [r for r in results if r.get("diagnosed")]
+    if diagnosed:
+        costs = [r["llm_cost_usd"] for r in diagnosed]
+        summary.update(
+            {
+                "llm_mode": llm_mode,
+                "diagnosed": len(diagnosed),
+                "service_correct": sum(r["service_correct"] for r in diagnosed),
+                "category_correct": sum(r["category_correct"] for r in diagnosed),
+                "cause_correct": sum(r["cause_correct"] for r in diagnosed),
+                "median_time_to_diagnosis_s": median([r["time_to_diagnosis_s"] for r in diagnosed]),
+                "median_llm_tokens": median([r["llm_tokens"] for r in diagnosed]),
+                "total_llm_cost_usd": round(sum(costs), 4) if None not in costs else None,
+            }
+        )
     RESULTS.mkdir(exist_ok=True)
-    out = RESULTS / f"{now():%Y-%m-%dT%H%M}-detection.json"
+    kind = f"investigation-{llm_mode}" if diagnosed else "detection"
+    out = RESULTS / f"{now():%Y-%m-%dT%H%M}-{kind}.json"
     out.write_text(json.dumps({"summary": summary, "results": results}, indent=2))
     print("\n" + table(results))
     print("\n" + json.dumps(summary, indent=2))
