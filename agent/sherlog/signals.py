@@ -37,6 +37,18 @@ class Signal:
         return data
 
 
+def describe(signal: Signal) -> str:
+    d = signal.details
+    if signal.type == "metric_anomaly":
+        peer = f" to {d['peer']}" if d.get("peer") else ""
+        return f"{d['metric']}{peer} {d.get('direction', '')} ({d['value']} vs baseline {d['baseline']})"
+    if signal.type in ("new_log_template", "log_spike"):
+        return f"{signal.type.replace('_', ' ')} \"{d.get('template', '')[:80]}\" ({d.get('per_minute')}/min)"
+    if signal.type in ("new_exception", "exception_spike"):
+        return f"{signal.type.replace('_', ' ')} {d.get('exception')}: {d.get('message', '')[:80]}"
+    return signal.type.replace("_", " ") + (f" {d}" if d else "")
+
+
 class SignalBus:
     def __init__(self) -> None:
         self.queue: asyncio.Queue[tuple[str, Signal]] = asyncio.Queue()
