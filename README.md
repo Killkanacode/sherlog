@@ -45,7 +45,7 @@ diagnosis.
 | http://localhost:9090 | Prometheus |
 | http://localhost:3100 | Loki API |
 | http://localhost:3200 | Tempo API |
-| http://localhost:8200/incidents | Sherlog API (`/incidents`, `/signals`, `/topology`, `/stream`) |
+| http://localhost:8200/incidents | Sherlog API (`/incidents`, `/postmortems`, `/settings`, `/signals`, `/topology`, `/stream`) |
 | http://localhost:8050/services | platform-api |
 | http://localhost:8100/scenarios | chaos-controller (benchmark only; Sherlog can't reach it) |
 | http://localhost:3000 | Grafana (optional: `docker compose --profile debug up -d grafana`) |
@@ -154,6 +154,56 @@ curl -s -X POST localhost:8200/incidents/<id>/investigate
 curl -s -X POST localhost:8200/tools/get_dependencies -H 'content-type: application/json' -d '{"service":"orders"}'
 ```
 
+## Mitigation, verification and memory
+
+The diagnosis ends with a recommended action. Sherlog can run five of them,
+all through platform-api and only on the shop's services: `rollback`,
+`config_revert`, `flag_off`, `restart` (which also covers Redis and Postgres)
+and `scale`. How far it goes on its own depends on the autonomy level:
+
+| Level | Behaviour |
+|---|---|
+| L0 | Suggests the action and never acts |
+| L1 (default) | Every action waits for `POST /incidents/<id>/approve` (or `/reject`) |
+| L2 | Low-risk rollbacks, flag flips and restarts run on their own when the diagnosis confidence is at least 0.7. Anything else waits for approval |
+
+Restarting a datastore always counts as medium risk. Dry run records what
+would have happened and changes nothing. Both settings come from `.env` and
+can be changed at runtime with `PUT /settings`.
+
+Before it acts, Sherlog records how to undo the action: the version to
+redeploy, the config to reapply, the flag to turn back on or the replica count
+to return to. Then it verifies the result. It watches the incident's services
+until their impact metrics are back at their learned baselines, no container
+is down and the incident's exceptions have stopped, all for 30 s in a row. If
+that doesn't happen within 180 s, it reverts the action and runs the
+investigator again, telling it what failed. After two failed mitigations it
+escalates to a human. A human can also pick an action with
+`POST /incidents/<id>/actions`, and it goes through the same verification.
+
+Closing an incident does two things:
+
+- **Postmortem.** Sherlog writes one in Markdown with the outcome, the impact
+  measured at the gateway (duration, and failed requests out of the total),
+  detect/mitigate/recover times, the root cause and its evidence, what was
+  ruled out (including mitigations that didn't help), the timeline and
+  follow-up actions.
+- **Incident memory.** Sherlog stores the incident's exception fingerprints,
+  error templates, root cause and the action that fixed it. When a new
+  incident shares a fingerprint or a template, its timeline says, for example,
+  "Seen before: incident #12 (orders, bad_deploy_code_bug), fixed by
+  rollback", and the investigator gets the match.
+  `search_past_incidents` reads the same memory. A diagnosis with zero
+  confidence isn't stored as knowledge.
+
+```bash
+curl -s -X POST localhost:8200/incidents/<id>/approve -H 'content-type: application/json' -d '{"actor":"me"}'
+curl -s -X POST localhost:8200/incidents/<id>/actions -H 'content-type: application/json' \
+  -d '{"type":"rollback","params":{"service":"orders"},"actor":"me"}'
+curl -s localhost:8200/incidents/<id>/postmortem   # Markdown
+curl -s -X PUT localhost:8200/settings -H 'content-type: application/json' -d '{"autonomy":"L2","dry_run":false}'
+```
+
 ## Built during the hackathon
 
 Everything in this repository was written during the hackathon (Oct 27 – Nov 4, 2026). The git history is the record.
@@ -163,6 +213,7 @@ Everything in this repository was written during the hackathon (Oct 27 – Nov 4
 - platform-api (deploys from git commits, rollback, config, flags, change events), chaos-controller with 15 scenarios, and the buggy branches.
 - Sherlog's detection pipeline: metric, log, exception and container detectors, incident grouping, topology, evidence funnel and root-cause hint, plus the detection benchmark.
 - The model layer, triage, the tool-calling investigator with its ten tools, and diagnosis scoring in the benchmark.
+- Actions with autonomy levels and dry run, the verification loop with automatic revert and re-investigation, incident memory and postmortems.
 
 ## License
 
