@@ -1,4 +1,5 @@
-"""Sherlog API: incidents, signals, topology, change events and a live stream."""
+"""Sherlog API: incidents, actions, postmortems, signals, topology, change
+events, settings and a live stream."""
 
 import asyncio
 import logging
@@ -7,15 +8,17 @@ from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
 
 from sherlog import db, llm
+from sherlog.actions.policy import policy
 from sherlog.api.stream import broadcaster
 from sherlog.config import settings
 from sherlog.detectors.containers import container_detector
 from sherlog.detectors.logs import log_detector
 from sherlog.detectors.metrics import metric_detector
-from sherlog.incidents.manager import manager
+from sherlog.incidents.manager import ActionError, manager
 from sherlog.investigator import tools
 from sherlog.ingest.clients import platform
 from sherlog.signals import bus, utcnow
@@ -40,6 +43,7 @@ async def backfill_events() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init()
+    await policy.load()
     await manager.load()
     await backfill_events()
     tasks = [
@@ -65,13 +69,16 @@ def _crash_logger(task: asyncio.Task) -> None:
         log.error("Background task %s crashed", task.get_name(), exc_info=task.exception())
 
 
-app = FastAPI(title="Sherlog", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Sherlog", version="0.3.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "learning": log_detector.learning, "llm": llm.mode(), "investigate": settings.investigate}
+    return {
+        "status": "ok", "learning": log_detector.learning, "llm": llm.mode(), "investigate": settings.investigate,
+        **policy.to_dict(),
+    }
 
 
 @app.get("/incidents")
@@ -106,14 +113,90 @@ async def rebuild_evidence(incident_id: int):
 
 @app.post("/incidents/{incident_id}/investigate", status_code=202)
 async def start_investigation(incident_id: int):
-    """Run (or re-run) triage and the investigator on an open incident."""
+    """Run (or re-run) triage and the investigator on a live incident."""
     incident = _incident(incident_id)
-    if not incident.open:
+    if not incident.live:
         raise HTTPException(status_code=409, detail=f"incident is {incident.status}")
-    if incident.investigating:
-        raise HTTPException(status_code=409, detail="already investigating")
+    if incident.busy:
+        raise HTTPException(status_code=409, detail="already investigating or acting")
     manager.spawn(manager.investigate(incident))
     return {"accepted": True}
+
+
+class Approval(BaseModel):
+    actor: str = "on-call"
+
+
+class Rejection(Approval):
+    reason: str | None = None
+
+
+class ActionRequest(Approval):
+    type: str
+    params: dict = {}
+
+
+@app.post("/incidents/{incident_id}/approve")
+async def approve_action(incident_id: int, body: Approval | None = None):
+    """Approve the action Sherlog is waiting on (autonomy L1, or L2 above low risk)."""
+    try:
+        return await manager.approve(_incident(incident_id), (body or Approval()).actor)
+    except ActionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/incidents/{incident_id}/reject")
+async def reject_action(incident_id: int, body: Rejection | None = None):
+    """Turn down the pending action; the incident is escalated."""
+    body = body or Rejection()
+    try:
+        return await manager.reject(_incident(incident_id), body.actor, body.reason)
+    except ActionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.post("/incidents/{incident_id}/actions", status_code=202)
+async def run_action(incident_id: int, body: ActionRequest):
+    """Have Sherlog run an action a human chose, with the same verification and revert."""
+    try:
+        return await manager.run_action(_incident(incident_id), body.type, body.params, body.actor)
+    except ActionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@app.get("/incidents/{incident_id}/postmortem", response_class=PlainTextResponse)
+async def get_postmortem(incident_id: int):
+    incident = manager.incidents.get(incident_id)
+    text = incident.postmortem if incident else ((await db.get_incident(incident_id)) or {}).get("data", {}).get("postmortem")
+    if not text:
+        raise HTTPException(status_code=404, detail="no postmortem for this incident")
+    return PlainTextResponse(text, media_type="text/markdown")
+
+
+@app.get("/postmortems")
+async def list_postmortems(limit: int = 50):
+    return await db.postmortems(limit)
+
+
+@app.get("/settings")
+async def get_settings():
+    return policy.to_dict()
+
+
+class SettingsUpdate(BaseModel):
+    autonomy: str | None = None
+    dry_run: bool | None = None
+
+
+@app.put("/settings")
+async def update_settings(body: SettingsUpdate):
+    """Autonomy level (L0 suggest, L1 approve, L2 auto for low risk) and dry run."""
+    try:
+        updated = await policy.update(body.autonomy, body.dry_run)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    broadcaster.publish("settings", {"settings": updated})
+    return updated
 
 
 @app.get("/tools")

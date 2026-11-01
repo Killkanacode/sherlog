@@ -40,18 +40,24 @@ How to work:
   or goes quiet may only be starved by a broken caller.
 - Change events right before the incident are prime suspects, but some changes are harmless noise.
   Confirm with code (diff_deploy, get_code_context), exceptions, traces or metrics before blaming one.
+- Past incidents in the evidence share an exception or a log pattern with this one; what fixed them is
+  a strong lead, but confirm it applies.
 - Be efficient: you have at most {settings.max_steps} turns. Stop as soon as the evidence is conclusive.
 
 Categories: {", ".join(CATEGORIES)}.
-Actions: {", ".join(ACTIONS)}. rollback undoes the service's last deploy; config_revert undoes its last
-config change; flag_off needs params.flag; scale needs params.replicas; open_fix_pr proposes a code fix;
-escalate hands over to a human when the cause is unclear or no safe action exists.
+recommended_action is the immediate mitigation. Sherlog runs it through the deploy platform, then checks
+that errors and latency are back to baseline, and reverts it if they are not.
+Actions: {", ".join(ACTIONS)}. rollback undoes the service's last deploy (the mitigation for a bug shipped
+in a recent deploy; the code fix comes later); config_revert undoes its last config change; flag_off needs
+params.flag; restart also works on redis and postgres; scale needs params.replicas (1-4); open_fix_pr only
+when no mitigation exists; escalate hands over to a human when the cause is unclear or no safe action exists.
+Never recommend again a mitigation listed under "Already tried": it did not restore the service.
 
 When you are done, reply with only a JSON object matching this schema (no tool call, no prose):
 {json.dumps(json_schema(Diagnosis))}"""
 
 
-def investigation_input(incident: dict, evidence: dict, triage: dict | None) -> str:
+def investigation_input(incident: dict, evidence: dict, triage: dict | None, attempts: list[str] | None = None) -> str:
     pack = {k: v for k, v in evidence.items() if k not in ("stats", "topology")}
     hint = pack.get("root_cause_hint") or {}
     pack["root_cause_hint"] = {"service": hint.get("service"), "reason": hint.get("reason")}
@@ -60,6 +66,8 @@ def investigation_input(incident: dict, evidence: dict, triage: dict | None) -> 
         "Triage:\n```json\n" + json.dumps(triage) + "\n```" if triage else "Triage: unavailable.",
         "Evidence pack:\n```json\n" + json.dumps(pack, default=str) + "\n```",
     ]
+    if attempts:
+        parts.append("Already tried:\n" + "\n".join(f"- {a}" for a in attempts))
     return "\n\n".join(parts)
 
 
@@ -75,12 +83,14 @@ def fallback(reason: str, service: str | None) -> dict:
 
 
 async def investigate(
-    model: ChatModel, incident: dict, evidence: dict, triage: dict | None, usage: Usage, emit: Emit
+    model: ChatModel, incident: dict, evidence: dict, triage: dict | None, usage: Usage, emit: Emit,
+    attempts: list[str] | None = None,
 ) -> dict:
+    """`attempts` describes mitigations that already failed on this incident."""
     ctx = ToolContext(incident["id"], datetime.fromisoformat(evidence["window"]["start"]))
     messages = [
         {"role": "system", "content": SYSTEM},
-        {"role": "user", "content": investigation_input(incident, evidence, triage)},
+        {"role": "user", "content": investigation_input(incident, evidence, triage, attempts)},
     ]
     hint = (evidence.get("root_cause_hint") or {}).get("service")
 
