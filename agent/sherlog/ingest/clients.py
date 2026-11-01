@@ -121,6 +121,25 @@ class Platform:
         response.raise_for_status()
         return response.text
 
+    async def flags(self) -> dict:
+        response = await self._http.get("/flags")
+        response.raise_for_status()
+        return response.json()
+
+    # Actions. Deploys roll containers with health gating, so allow them time.
+    async def act(self, method: str, path: str, body: dict) -> dict:
+        response = await self._http.request(method, path, json={"actor": ACTOR, **body}, timeout=180.0)
+        if response.is_error:
+            raise PlatformError(f"{method} {path} -> {response.status_code}: {response.text[:300]}")
+        return response.json()
+
+
+class PlatformError(Exception):
+    """The platform refused or failed an action."""
+
+
+ACTOR = "sherlog"
+
 
 prometheus = Prometheus()
 loki = Loki()
