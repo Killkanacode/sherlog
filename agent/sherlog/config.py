@@ -64,6 +64,16 @@ class Settings:
     token_budget: int = _int("SHERLOG_TOKEN_BUDGET_PER_INCIDENT", 60000)
     tool_timeout_s: float = _float("SHERLOG_TOOL_TIMEOUT_S", 20.0)
 
+    # Actions. Autonomy and dry run are only the defaults: PUT /settings changes
+    # them at runtime and the choice is kept in Sherlog's database.
+    autonomy: str = os.environ.get("SHERLOG_AUTONOMY", "L1")  # L0 suggest | L1 approve | L2 auto for low risk
+    dry_run: bool = _bool("SHERLOG_DRY_RUN", False)
+    auto_min_confidence: float = _float("SHERLOG_AUTO_MIN_CONFIDENCE", 0.7)
+    max_action_cycles: int = _int("SHERLOG_MAX_ACTION_CYCLES", 2)
+    verify_timeout_s: int = _int("SHERLOG_VERIFY_TIMEOUT_S", 180)  # give up on recovery after this
+    verify_healthy_s: int = _int("SHERLOG_VERIFY_HEALTHY_S", 30)  # healthy this long = recovered
+    verify_poll_s: float = _float("SHERLOG_VERIFY_POLL_S", 10.0)
+
 
 settings = Settings()
 

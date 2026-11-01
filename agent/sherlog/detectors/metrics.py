@@ -236,6 +236,27 @@ class MetricDetector:
             elapsed = asyncio.get_running_loop().time() - started
             await asyncio.sleep(max(0.0, settings.detect_interval_s - elapsed))
 
+    def anomalies(self, services: set[str]) -> list[dict]:
+        """Impact series of these services that are off their baseline at the
+        last tick, without waiting for persistence: what verification checks."""
+        rules = {rule.name: rule for rule in RULES}
+        found = []
+        for key, state in sorted(self.series.items()):
+            rule = rules[key[0]]
+            if not rule.impact or key[1] not in services or state.last_value is None:
+                continue
+            if self._evaluate(rule, state, state.last_value)[0]:
+                found.append(
+                    {
+                        "metric": rule.name,
+                        "service": key[1],
+                        "peer": key[2] if len(key) > 2 else None,
+                        "value": round(state.last_value, 4),
+                        "baseline": round(state.baseline.mean, 4),
+                    }
+                )
+        return found
+
     def snapshot(self) -> list[dict]:
         return [
             {
