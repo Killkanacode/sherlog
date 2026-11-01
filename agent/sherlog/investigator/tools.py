@@ -20,6 +20,7 @@ from sherlog.detectors.logs import log_detector, trim_stack
 from sherlog.detectors.metrics import metric_detector
 from sherlog.funnel.builder import summarize_trace
 from sherlog.ingest.clients import loki, platform, prometheus, tempo
+from sherlog.memory import store as memory
 from sherlog.signals import bus, utcnow
 from sherlog.topology.graph import topology
 
@@ -383,8 +384,8 @@ async def get_dependencies(ctx: ToolContext, service: str):
 
 
 @tool(
-    "Earlier incidents that share an exception fingerprint or a log template, or involved a service, "
-    "with their diagnosis when there was one.",
+    "Closed incidents (incident memory) that share an exception fingerprint or a log template, or whose "
+    "root cause was a service: their root cause, outcome and the action that fixed them.",
     fingerprint=({"type": "string"}, False),
     template=({"type": "string", "description": "Template text or template id."}, False),
     service=(ANY_SERVICE, False),
@@ -394,16 +395,4 @@ async def search_past_incidents(
 ):
     if not (fingerprint or template or service):
         return {"error": "give a fingerprint, a template or a service"}
-    rows = await db.search_incidents(ctx.incident_id, service, [x for x in (fingerprint, template) if x])
-    return [
-        {
-            "id": row["id"],
-            "status": row["status"],
-            "title": row["title"],
-            "services": row["services"],
-            "created_at": row["created_at"],
-            "resolved_at": row["resolved_at"],
-            "root_cause": (row["diagnosis"] or {}).get("root_cause"),
-        }
-        for row in rows
-    ]
+    return await memory.search(ctx.incident_id, fingerprint, template, service)

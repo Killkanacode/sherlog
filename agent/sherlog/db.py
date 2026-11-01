@@ -43,6 +43,25 @@ CREATE TABLE IF NOT EXISTS sherlog.llm_calls (
     cost_usd      numeric
 );
 CREATE INDEX IF NOT EXISTS llm_calls_incident_idx ON sherlog.llm_calls (incident_id);
+CREATE TABLE IF NOT EXISTS sherlog.memory (
+    incident_id  integer     PRIMARY KEY REFERENCES sherlog.incidents (id),
+    closed_at    timestamptz NOT NULL,
+    title        text        NOT NULL,
+    service      text,
+    category     text,
+    summary      text,
+    outcome      text        NOT NULL,
+    action       jsonb,
+    fingerprints text[]      NOT NULL,
+    templates    text[]      NOT NULL,
+    resolve_s    real
+);
+CREATE INDEX IF NOT EXISTS memory_fingerprints_idx ON sherlog.memory USING gin (fingerprints);
+CREATE INDEX IF NOT EXISTS memory_templates_idx ON sherlog.memory USING gin (templates);
+CREATE TABLE IF NOT EXISTS sherlog.settings (
+    key   text  PRIMARY KEY,
+    value jsonb NOT NULL
+);
 """
 
 
@@ -150,27 +169,88 @@ async def llm_totals() -> list[dict]:
         return [dict(row._mapping) for row in rows]
 
 
-async def search_incidents(
-    exclude_id: int, service: str | None = None, needles: list[str] | None = None, limit: int = 5
+async def get_incident(incident_id: int) -> dict | None:
+    async with engine.connect() as conn:
+        row = (await conn.execute(text("SELECT * FROM sherlog.incidents WHERE id = :id"), {"id": incident_id})).first()
+        return dict(row._mapping) if row else None
+
+
+async def postmortems(limit: int = 50) -> list[dict]:
+    async with engine.connect() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT id, status, title, services, created_at, resolved_at FROM sherlog.incidents "
+                "WHERE data ->> 'postmortem' IS NOT NULL ORDER BY id DESC LIMIT :limit"
+            ),
+            {"limit": limit},
+        )
+        return [dict(row._mapping) for row in rows]
+
+
+# ------------------------------------------------------------ incident memory
+MEMORY_COLUMNS = (
+    "incident_id", "closed_at", "title", "service", "category", "summary", "outcome", "action",
+    "fingerprints", "templates", "resolve_s",
+)
+
+
+async def remember(record: dict) -> None:
+    columns = ", ".join(MEMORY_COLUMNS)
+    values = ", ".join("CAST(:action AS jsonb)" if c == "action" else f":{c}" for c in MEMORY_COLUMNS)
+    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in MEMORY_COLUMNS[1:])
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(f"INSERT INTO sherlog.memory ({columns}) VALUES ({values}) ON CONFLICT (incident_id) DO UPDATE SET {updates}"),
+            {**record, "action": json.dumps(record["action"]) if record["action"] else None},
+        )
+
+
+async def recall(
+    exclude_id: int, fingerprints: list[str] = (), templates: list[str] = (), service: str | None = None,
+    template_like: str | None = None, limit: int = 5,
 ) -> list[dict]:
-    """Earlier incidents on a service, or whose stored data mentions any needle
-    (an exception fingerprint or a log template)."""
-    clauses, params = [], {"exclude": exclude_id, "limit": limit}
+    """Past incidents sharing an exception fingerprint or a log template (or on
+    a service), best matches first: a shared fingerprint outranks a template."""
+    clauses, params = [], {"exclude": exclude_id, "limit": limit, "fps": list(fingerprints), "tpls": list(templates)}
+    if fingerprints:
+        clauses.append("fingerprints && CAST(:fps AS text[])")
+    if templates:
+        clauses.append("templates && CAST(:tpls AS text[])")
+    if template_like:
+        clauses.append("EXISTS (SELECT 1 FROM unnest(templates) t WHERE strpos(t, :pattern) > 0)")
+        params["pattern"] = template_like
     if service:
-        clauses.append(":service = ANY(services)")
+        clauses.append("service = :service")
         params["service"] = service
-    for i, needle in enumerate(needles or []):
-        clauses.append(f"strpos(data::text, :needle{i}) > 0")
-        params[f"needle{i}"] = needle
     if not clauses:
         return []
     async with engine.connect() as conn:
         rows = await conn.execute(
             text(
-                "SELECT id, status, title, services, created_at, resolved_at, "
-                "data -> 'diagnosis' AS diagnosis FROM sherlog.incidents "
-                f"WHERE id <> :exclude AND ({' OR '.join(clauses)}) ORDER BY id DESC LIMIT :limit"
+                "SELECT *, "
+                "cardinality(ARRAY(SELECT unnest(fingerprints) INTERSECT SELECT unnest(CAST(:fps AS text[])))) AS shared_fingerprints, "
+                "cardinality(ARRAY(SELECT unnest(templates) INTERSECT SELECT unnest(CAST(:tpls AS text[])))) AS shared_templates "
+                f"FROM sherlog.memory WHERE incident_id <> :exclude AND ({' OR '.join(clauses)}) "
+                "ORDER BY shared_fingerprints DESC, shared_templates DESC, incident_id DESC LIMIT :limit"
             ),
             params,
         )
         return [dict(row._mapping) for row in rows]
+
+
+# ------------------------------------------------------------ settings
+async def get_setting(key: str) -> dict | None:
+    async with engine.connect() as conn:
+        row = (await conn.execute(text("SELECT value FROM sherlog.settings WHERE key = :key"), {"key": key})).first()
+        return row.value if row else None
+
+
+async def put_setting(key: str, value: dict) -> None:
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO sherlog.settings (key, value) VALUES (:key, CAST(:value AS jsonb)) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+            ),
+            {"key": key, "value": json.dumps(value)},
+        )
