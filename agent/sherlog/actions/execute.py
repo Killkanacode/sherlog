@@ -58,8 +58,9 @@ async def execute(type_: str, params: dict) -> tuple[dict, dict | None]:
     if type_ == "rollback":
         current = (await platform.history(service))[-1]
         result = await platform.act("POST", "/rollback", {"service": service})
+        now = await _version(service)
         undo = _undo(f"redeploy {service} {current['version']}", "POST", "/deploy",
-                     {"service": service, "ref": current["commit_sha"]})
+                     {"service": service, "ref": current["commit_sha"]}, expect={"service": service, "version": now})
     elif type_ == "config_revert":
         result = await platform.act("POST", f"/config/{service}/revert", {})
         restore = {k: c["from"] for k, c in result["changes"].items() if c["from"] not in (None, "***")}
@@ -72,7 +73,8 @@ async def execute(type_: str, params: dict) -> tuple[dict, dict | None]:
     elif type_ == "scale":
         before = next(s["replicas"] for s in await platform.services() if s["service"] == service)
         result = await platform.act("POST", "/scale", {"service": service, "replicas": params["replicas"]})
-        undo = _undo(f"scale {service} back to {before}", "POST", "/scale", {"service": service, "replicas": before})
+        undo = _undo(f"scale {service} back to {before}", "POST", "/scale", {"service": service, "replicas": before},
+                     expect={"service": service, "replicas": params["replicas"]})
     elif type_ == "restart":
         result = await platform.act("POST", "/restart", {"service": service})
         undo = None
@@ -81,9 +83,31 @@ async def execute(type_: str, params: dict) -> tuple[dict, dict | None]:
     return result, undo
 
 
+class Superseded(Exception):
+    """The service changed after Sherlog's action; undoing it now would clobber that change."""
+
+
 async def revert(undo: dict) -> dict:
+    """Undo an action, unless someone (a human, a reset, another deploy) has
+    changed the service since: then the undo would bring back a stale state."""
+    expect = undo.get("expect")
+    if expect:
+        state = next((s for s in await platform.services() if s["service"] == expect["service"]), {})
+        for field in ("version", "replicas"):
+            if field in expect and state.get(field) != expect[field]:
+                raise Superseded(
+                    f"{expect['service']} changed since the action ({field} is now {state.get(field)}, "
+                    f"Sherlog left {expect[field]}); not reverting"
+                )
     return await platform.act(undo["method"], undo["path"], undo["body"])
 
 
-def _undo(description: str, method: str, path: str, body: dict) -> dict:
-    return {"description": description, "method": method, "path": path, "body": body}
+async def _version(service: str) -> str | None:
+    return next((s.get("version") for s in await platform.services() if s["service"] == service), None)
+
+
+def _undo(description: str, method: str, path: str, body: dict, expect: dict | None = None) -> dict:
+    undo = {"description": description, "method": method, "path": path, "body": body}
+    if expect:
+        undo["expect"] = expect
+    return undo

@@ -24,13 +24,15 @@ from datetime import datetime, timedelta
 from sherlog import db, llm
 from sherlog.actions import execute as actions
 from sherlog.actions import verify
-from sherlog.actions.policy import policy
+from sherlog.actions.policy import policy, throttle, vet
 from sherlog.api.stream import broadcaster
 from sherlog.config import settings
+from sherlog.detectors.logs import log_detector
 from sherlog.funnel.builder import build_evidence
 from sherlog.funnel.heuristics import is_impact
 from sherlog.investigator import agent as investigator
 from sherlog.investigator.triage import run_triage
+from sherlog.llm.redact import looks_like_injection, scan_evidence
 from sherlog.llm.usage import Usage
 from sherlog.memory import store as memory
 from sherlog.postmortem import writer as postmortem
@@ -74,13 +76,14 @@ class Incident:
     actions: list[dict] = field(default_factory=list)
     seen_before: list[dict] = field(default_factory=list)
     postmortem: str | None = None
+    untrusted: str | None = None  # instruction-like text found in its telemetry
 
     def __post_init__(self) -> None:
         self.usage = self.usage or Usage(self.id)
 
     @property
     def investigating(self) -> bool:
-        return bool(self.investigation and self.investigation["state"] == "running")
+        return bool(self.investigation and self.investigation["state"] in ("running", "queued"))
 
     @property
     def open(self) -> bool:
@@ -141,6 +144,7 @@ class Incident:
             "actions": self.actions,
             "past_incidents": self.seen_before,  # every memory match; summary's seen_before is the best one
             "postmortem": self.postmortem,
+            "untrusted_content": self.untrusted,
             "llm_calls": self.usage.calls,
         }
 
@@ -153,6 +157,9 @@ class IncidentManager:
         self.incidents: dict[int, Incident] = {}
         self.unattached: list[Signal] = []  # recent supporting signals with no incident yet
         self._tasks: set[asyncio.Task] = set()  # keep references so tasks aren't garbage-collected
+        # Investigations call the models; cap how many run at once so an
+        # incident storm queues instead of multiplying cost and rate limits.
+        self._slots = asyncio.Semaphore(settings.max_concurrent_investigations)
 
     # ------------------------------------------------------------ lookup
     def open_incidents(self) -> list[Incident]:
@@ -274,6 +281,12 @@ class IncidentManager:
             log.exception("Memory recall failed for incident #%d", incident.id)
             evidence["past_incidents"] = []
         incident.evidence = evidence
+        hit = scan_evidence(evidence)
+        if not hit:
+            line = log_detector.suspicious_in(set(incident.services), datetime.fromisoformat(evidence["window"]["start"]))
+            hit = line and line["match"]
+        if hit and not incident.untrusted:
+            self._flag_untrusted(incident, hit)
         stats = evidence["stats"]
         incident.add_timeline(
             "evidence",
@@ -301,10 +314,36 @@ class IncidentManager:
         if settings.investigate and incident.open:
             await self.investigate(incident)
 
+    @staticmethod
+    def _flag_untrusted(incident: Incident, hit: str) -> None:
+        incident.untrusted = hit
+        incident.add_timeline(
+            "security",
+            f'Telemetry contains text that reads like instructions to an AI ("{hit[:80]}"). '
+            "It is treated as data, and no action will run without a human's approval.",
+            {"match": hit},
+        )
+
     # ------------------------------------------------------------ investigation
     async def investigate(self, incident: Incident, refresh: bool = False) -> None:
         """Triage, then the investigator, then act on the diagnosis. `refresh`
-        rebuilds the evidence first (after a mitigation that didn't help)."""
+        rebuilds the evidence first (after a mitigation that didn't help).
+        Waits for a free slot when too many investigations are running."""
+        if incident.busy:
+            return
+        if self._slots.locked():
+            incident.investigation = {"state": "queued", "mode": llm.mode(), "queued_at": utcnow().isoformat()}
+            incident.add_timeline(
+                "status", f"Queued: {settings.max_concurrent_investigations} investigations are already running"
+            )
+            await self.save(incident)
+        async with self._slots:
+            if not incident.live:
+                return
+            incident.investigation = None
+            await self._investigate(incident, refresh)
+
+    async def _investigate(self, incident: Incident, refresh: bool) -> None:
         if incident.busy:
             return
         incident.investigation = {"state": "running", "mode": llm.mode(), "started_at": utcnow().isoformat()}
@@ -334,6 +373,12 @@ class IncidentManager:
             else:
                 await self.set_status(incident, "detected", "Back to detection only; resolves when the signals clear")
             return
+        if not incident.untrusted:
+            for entry in incident.timeline:
+                hit = entry["kind"] == "tool" and looks_like_injection(str(entry["data"].get("result", "")))
+                if hit:
+                    self._flag_untrusted(incident, hit)
+                    break
         cause = incident.diagnosis["root_cause"]
         totals = incident.usage.totals()
         incident.investigation.update(
@@ -386,8 +431,23 @@ class IncidentManager:
             return await self.escalate(
                 incident, f"the investigator recommended again to {actions.describe(type_, params)}, which already failed"
             )
+        unfit = vet(incident.evidence, incident.services, type_, params)
+        if unfit:
+            return await self.escalate(incident, f"the recommended action failed a safety check: {unfit}")
         action = self._new_action(incident, type_, params, actions.risk(type_, params, recommended["risk"]), "sherlog")
         decision = policy.decide(action, cause["confidence"])
+        held = ""
+        if decision == "auto":
+            now = utcnow()
+            recent = [
+                a for i in self.incidents.values() for a in i.actions
+                if a.get("executed_at") and now - datetime.fromisoformat(a["executed_at"]) < timedelta(hours=1)
+            ]
+            reason = (
+                "the evidence contains instruction-like text" if incident.untrusted else throttle(recent, params.get("service"), now)
+            )
+            if reason:
+                decision, held = "approve", f"; not automatic because {reason}"
         incident.status = "mitigating"
         if decision == "suggest":
             action["state"] = "suggested"
@@ -395,7 +455,7 @@ class IncidentManager:
         elif decision == "approve":
             action["state"] = "awaiting_approval"
             await self._action_event(
-                incident, action, f"Awaiting approval: {action['description']} (risk {action['risk']})"
+                incident, action, f"Awaiting approval: {action['description']} (risk {action['risk']}{held})"
             )
         else:
             action.update(state="approved", approved_by="sherlog", approved_at=utcnow().isoformat())
@@ -528,6 +588,9 @@ class IncidentManager:
                 action["revert_result"] = await actions.revert(action["undo"])
                 action["state"] = "reverted"
                 text += f". Reverted: {action['undo']['description']}"
+            except actions.Superseded as exc:
+                action["state"] = "not_recovered"
+                text += f". {str(exc)[0].upper()}{str(exc)[1:]}"
             except Exception as exc:  # noqa: BLE001
                 action.update(state="not_recovered", error=f"revert failed: {exc}")
                 text += f". Could not revert ({exc})"
