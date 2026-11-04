@@ -41,6 +41,7 @@ diagnosis.
 
 | URL | What |
 |---|---|
+| http://localhost:8300 | **Sherlog's web console** (`WEB_HOST_PORT`) |
 | http://localhost:8000/products | Shop gateway (`GATEWAY_HOST_PORT`) |
 | http://localhost:9090 | Prometheus |
 | http://localhost:3100 | Loki API |
@@ -204,6 +205,39 @@ curl -s localhost:8200/incidents/<id>/postmortem   # Markdown
 curl -s -X PUT localhost:8200/settings -H 'content-type: application/json' -d '{"autonomy":"L2","dry_run":false}'
 ```
 
+## Web console
+
+Everything above can be done from the browser at http://localhost:8300:
+
+- **Live:** the service map learned from traces (nodes turn red when
+  anomalous, edges show req/s and errors), live incidents with an inline
+  Approve button, RED sparklines per service, and the change feed.
+- **Incident:** the investigation streaming in (signals, evidence, each
+  hypothesis and tool call, the conclusion), the root cause with its
+  confidence, the mitigation with Approve / Reject or an action of your
+  choice, verification progress check by check, an impact chart marked with
+  detection, action and recovery, and the evidence pack: the funnel from log
+  lines to tokens, exceptions with the code they point at, the deploy diff,
+  log patterns and trace waterfalls.
+- **Chaos Lab:** one button per scenario, the run in progress with time to
+  detect, an answer key to compare with Sherlog's diagnosis, and Reset.
+- **Postmortems**, rendered, with copy and download. **Settings** for the
+  autonomy level and dry run. **How it works** for the pipeline and the
+  architecture.
+
+The console is a React + Vite app in `web/`, served by nginx, which also
+proxies Sherlog's API, the chaos controller and two read-only views
+(Prometheus range queries and platform-api's services and flags) under one
+origin. The console joins the chaos network to drive the Chaos Lab; the agent
+still can't reach it.
+
+To work on it with hot reload against the running stack:
+
+```bash
+npm --prefix web install
+npm --prefix web run dev   # http://localhost:5173
+```
+
 ## Built during the hackathon
 
 Everything in this repository was written during the hackathon (Oct 27 – Nov 4, 2026). The git history is the record.
@@ -214,6 +248,7 @@ Everything in this repository was written during the hackathon (Oct 27 – Nov 4
 - Sherlog's detection pipeline: metric, log, exception and container detectors, incident grouping, topology, evidence funnel and root-cause hint, plus the detection benchmark.
 - The model layer, triage, the tool-calling investigator with its ten tools, and diagnosis scoring in the benchmark.
 - Actions with autonomy levels and dry run, the verification loop with automatic revert and re-investigation, incident memory and postmortems.
+- The web console: Live, Incident, Chaos Lab, Postmortems, Settings and How it works, with live streaming.
 
 ## License
 

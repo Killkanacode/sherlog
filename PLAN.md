@@ -437,10 +437,11 @@ Fechas en 2026, hora de Ecuador. Cada fase termina con sus criterios de aceptaci
 - **Estado (30 oct):** verificado en el stack con modelos falsos. El escenario 3 se resolvió dos veces: detecta, escala, rollback pedido por la API, verificación y postmortem. En la segunda vuelta apareció "Seen before: incident #28 (orders), fixed by rollback". La reversión también se probó en vivo: una acción equivocada se verificó como inútil, se revirtió, se re-investigó y se escaló. **Falta** que el rollback lo recomiende Muse Spark real (pendiente de cerrar la Fase 3).
 
 ### Fase 5 — Domingo 1 nov: interfaz web
-- [ ] Pantallas Live, Incident y Chaos Lab (5.5) con streaming.
-- [ ] Botón Approve conectado a la API.
-- [ ] Pantallas Postmortems y Settings.
+- [x] Pantallas Live, Incident y Chaos Lab (5.5) con streaming.
+- [x] Botón Approve conectado a la API.
+- [x] Pantallas Postmortems y Settings.
 - **Acepta si:** toda la demo se puede hacer desde el navegador, sin terminal.
+- **Estado (4 nov):** escenario 3 hecho entero desde el navegador con modelos falsos: inyección en el Chaos Lab, detección en 11 s, rollback elegido en la pantalla del incidente, verificación en vivo (recuperado 70 s después) y postmortem. El botón Approve está conectado, pero no se probó en vivo porque los modelos falsos siempre escalan. Extra: pantalla "How it works" con el pipeline y la arquitectura.
 
 ### Fase 6 — Lunes 2 nov: benchmark + Muse Code + voz
 - [ ] Runner del benchmark (5.6) y corrida de los 15 escenarios más la línea base.
