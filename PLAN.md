@@ -429,18 +429,19 @@ Fechas en 2026, hora de Ecuador. Cada fase termina con sus criterios de aceptaci
 - **Acepta si:** cada escenario genera exactamente un incidente sin usar LLM, y 10 min sin fallas generan 0–1 falsos positivos.
 
 ### Fase 3 — Viernes 30 oct: modelos de Meta + investigador
-- [ ] Módulo `llm/` con los clientes verificados contra la doc (sección 2).
-- [ ] Triaje con Muse Spark Open (5.4.6).
-- [ ] Investigador con herramientas y salida JSON (5.4.7), emitiendo sus pasos por SSE.
-- [ ] Contabilidad de tokens y costo por incidente.
+- [x] Módulo `llm/` con los clientes verificados contra la doc (sección 2).
+- [x] Triaje con Muse Spark Open (5.4.6).
+- [x] Investigador con herramientas y salida JSON (5.4.7), emitiendo sus pasos por SSE.
+- [x] Contabilidad de tokens y costo por incidente.
 - **Acepta si:** acierta servicio y categoría en los escenarios 1, 3, 7 y 13.
+- **Estado (4 nov):** aceptada con modelos reales (Muse Spark 1.3 + Muse Spark Open en Baseten): 4/4 en servicio, categoría y acción (`benchmark/results/2026-11-04T1815-investigation-live.json`). Detección mediana 12 s, diagnóstico mediano 78 s, $0.39 por los cuatro. Para llegar ahí: definiciones de cada categoría en el prompt (Redis salía `process_crash`), latencia p95 de cada llamada vista por quien llama y por el llamado en `get_dependencies` (en el 7 culpaba al pool de orders), y la memoria marca como no verificado el diagnóstico de un incidente escalado.
 
 ### Fase 4 — Sábado 31 oct: acciones, verificación, memoria, postmortem
 - [x] Acciones con niveles de autonomía y `dry_run` (5.4.8).
 - [x] Bucle de verificación con reversión automática.
 - [x] Memoria de incidentes (5.4.10) y postmortem (5.4.11).
 - **Acepta si:** el escenario 3 queda resuelto de punta a punta (detecta → investiga → rollback → verifica → postmortem), y al repetirlo aparece "seen before".
-- **Estado (30 oct):** verificado en el stack con modelos falsos. El escenario 3 se resolvió dos veces: detecta, escala, rollback pedido por la API, verificación y postmortem. En la segunda vuelta apareció "Seen before: incident #28 (orders), fixed by rollback". La reversión también se probó en vivo: una acción equivocada se verificó como inútil, se revirtió, se re-investigó y se escaló. **Falta** que el rollback lo recomiende Muse Spark real (pendiente de cerrar la Fase 3).
+- **Estado (30 oct):** verificado en el stack con modelos falsos. El escenario 3 se resolvió dos veces: detecta, escala, rollback pedido por la API, verificación y postmortem. En la segunda vuelta apareció "Seen before: incident #28 (orders), fixed by rollback". La reversión también se probó en vivo: una acción equivocada se verificó como inútil, se revirtió, se re-investigó y se escaló. **4 nov:** con Muse Spark real el rollback lo propone el modelo y el operador lo aprueba (e2e escenario 3, incidente #64, 9/9).
 
 ### Fase 5 — Domingo 1 nov: interfaz web
 - [x] Pantallas Live, Incident y Chaos Lab (5.5) con streaming.
