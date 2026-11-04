@@ -58,6 +58,15 @@ class Settings:
     price_open_in: float | None = _price("OPEN_MODEL_PRICE_IN")
     price_open_out: float | None = _price("OPEN_MODEL_PRICE_OUT")
 
+    # Model guardrails: a month's spend and tokens (0 = no limit), how many
+    # investigations run at once, and a breaker that pauses model calls after
+    # consecutive failures instead of hammering a broken API.
+    monthly_spend_limit_usd: float = _float("SHERLOG_MONTHLY_SPEND_LIMIT_USD", 0.0)
+    monthly_token_limit: int = _int("SHERLOG_MONTHLY_TOKEN_LIMIT", 0)
+    max_concurrent_investigations: int = _int("SHERLOG_MAX_CONCURRENT_INVESTIGATIONS", 2)
+    breaker_failures: int = _int("SHERLOG_LLM_BREAKER_FAILURES", 3)
+    breaker_cooldown_s: int = _int("SHERLOG_LLM_BREAKER_COOLDOWN_S", 300)
+
     # Investigation
     investigate: bool = _bool("SHERLOG_INVESTIGATE", True)
     max_steps: int = _int("SHERLOG_MAX_STEPS", 12)
@@ -73,6 +82,19 @@ class Settings:
     verify_timeout_s: int = _int("SHERLOG_VERIFY_TIMEOUT_S", 180)  # give up on recovery after this
     verify_healthy_s: int = _int("SHERLOG_VERIFY_HEALTHY_S", 30)  # healthy this long = recovered
     verify_poll_s: float = _float("SHERLOG_VERIFY_POLL_S", 10.0)
+    # Guardrails on what Sherlog proposes (a human's request skips the first two).
+    max_auto_actions_per_hour: int = _int("SHERLOG_MAX_ACTIONS_PER_HOUR", 6)
+    service_cooldown_s: int = _int("SHERLOG_SERVICE_COOLDOWN_S", 600)
+
+    # Access. API keys are "name:role:sha256(token)" entries; SHERLOG_ADMIN_TOKEN
+    # sets the first admin's token (otherwise one is generated and logged once).
+    api_keys: str = os.environ.get("SHERLOG_API_KEYS", "")
+    admin_token: str = os.environ.get("SHERLOG_ADMIN_TOKEN", "")
+    events_token: str = os.environ.get("SHERLOG_EVENTS_TOKEN", "")  # platform-api's push of change events
+    secret_key: str = os.environ.get("SHERLOG_SECRET_KEY", "")  # signs sessions; generated and stored if unset
+    session_hours: int = _int("SHERLOG_SESSION_HOURS", 12)
+    secure_cookies: bool = _bool("SHERLOG_SECURE_COOKIES", False)  # true behind HTTPS
+    cors_origins: str = os.environ.get("SHERLOG_CORS_ORIGINS", "")  # comma-separated; empty = same origin only
 
 
 settings = Settings()

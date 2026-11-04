@@ -62,6 +62,17 @@ CREATE TABLE IF NOT EXISTS sherlog.settings (
     key   text  PRIMARY KEY,
     value jsonb NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sherlog.audit (
+    id      bigserial   PRIMARY KEY,
+    ts      timestamptz NOT NULL DEFAULT now(),
+    actor   text,
+    role    text,
+    method  text        NOT NULL,
+    path    text        NOT NULL,
+    status  integer     NOT NULL,
+    ip      text
+);
+CREATE INDEX IF NOT EXISTS audit_ts_idx ON sherlog.audit (ts);
 """
 
 
@@ -235,6 +246,56 @@ async def recall(
             ),
             params,
         )
+        return [dict(row._mapping) for row in rows]
+
+
+async def key_frequencies(fingerprints: list[str], templates: list[str]) -> tuple[int, dict, dict]:
+    """How many remembered incidents contain each key, and how many there are."""
+    async with engine.connect() as conn:
+        total = (await conn.execute(text("SELECT count(*) FROM sherlog.memory"))).scalar_one()
+        counts = []
+        for column, values in (("fingerprints", fingerprints), ("templates", templates)):
+            rows = await conn.execute(
+                text(
+                    f"SELECT k, count(*) AS n FROM sherlog.memory, unnest({column}) AS k "
+                    "WHERE k = ANY(CAST(:keys AS text[])) GROUP BY k"
+                ),
+                {"keys": list(values)},
+            )
+            counts.append({row.k: row.n for row in rows})
+    return total, counts[0], counts[1]
+
+
+async def month_usage() -> dict:
+    """Model tokens and cost since the start of the month (cost null if any call is unpriced)."""
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT coalesce(sum(input_tokens + output_tokens), 0) AS tokens, "
+                    "CASE WHEN bool_and(cost_usd IS NOT NULL) THEN coalesce(sum(cost_usd), 0)::float END AS cost_usd "
+                    "FROM sherlog.llm_calls WHERE ts >= date_trunc('month', now())"
+                )
+            )
+        ).first()
+        return {"tokens": int(row.tokens), "cost_usd": row.cost_usd if row.cost_usd is not None else 0.0}
+
+
+# ------------------------------------------------------------ audit
+async def insert_audit(actor: str | None, role: str | None, method: str, path: str, status: int, ip: str | None) -> None:
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO sherlog.audit (actor, role, method, path, status, ip) "
+                "VALUES (:actor, :role, :method, :path, :status, :ip)"
+            ),
+            {"actor": actor, "role": role, "method": method, "path": path, "status": status, "ip": ip},
+        )
+
+
+async def recent_audit(limit: int = 200) -> list[dict]:
+    async with engine.connect() as conn:
+        rows = await conn.execute(text("SELECT * FROM sherlog.audit ORDER BY id DESC LIMIT :limit"), {"limit": limit})
         return [dict(row._mapping) for row in rows]
 
 
