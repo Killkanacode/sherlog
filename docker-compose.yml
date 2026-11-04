@@ -213,6 +213,23 @@ services:
       SHERLOG_MAX_ACTION_CYCLES: ${SHERLOG_MAX_ACTION_CYCLES:-2}
       SHERLOG_VERIFY_TIMEOUT_S: ${SHERLOG_VERIFY_TIMEOUT_S:-180}
       SHERLOG_VERIFY_HEALTHY_S: ${SHERLOG_VERIFY_HEALTHY_S:-30}
+      SHERLOG_MAX_ACTIONS_PER_HOUR: ${SHERLOG_MAX_ACTIONS_PER_HOUR:-6}
+      SHERLOG_SERVICE_COOLDOWN_S: ${SHERLOG_SERVICE_COOLDOWN_S:-600}
+      # Model guardrails
+      SHERLOG_MONTHLY_SPEND_LIMIT_USD: ${SHERLOG_MONTHLY_SPEND_LIMIT_USD:-0}
+      SHERLOG_MONTHLY_TOKEN_LIMIT: ${SHERLOG_MONTHLY_TOKEN_LIMIT:-0}
+      SHERLOG_MAX_CONCURRENT_INVESTIGATIONS: ${SHERLOG_MAX_CONCURRENT_INVESTIGATIONS:-2}
+      # Access (see README, "Security")
+      SHERLOG_ADMIN_TOKEN: ${SHERLOG_ADMIN_TOKEN:-}
+      SHERLOG_API_KEYS: ${SHERLOG_API_KEYS:-}
+      SHERLOG_SECRET_KEY: ${SHERLOG_SECRET_KEY:-}
+      SHERLOG_EVENTS_TOKEN: ${SHERLOG_EVENTS_TOKEN:-}
+      SHERLOG_SECURE_COOKIES: ${SHERLOG_SECURE_COOKIES:-false}
+      SHERLOG_CORS_ORIGINS: ${SHERLOG_CORS_ORIGINS:-}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     ports: ["127.0.0.1:8200:8200"]
     depends_on:
       sherlog-db: {condition: service_healthy}
@@ -240,6 +257,7 @@ services:
     image: sherlog/web:dev
     restart: unless-stopped
     mem_limit: 64m
+    security_opt: [no-new-privileges:true]
     networks: [sherlog, obs, platform, chaos]
     ports: ["127.0.0.1:${WEB_HOST_PORT:-8300}:80"]
     depends_on: [sherlog-api, chaos-controller, prometheus, platform-api]
@@ -257,6 +275,7 @@ services:
     environment:
       COMPOSE_PROJECT: sherlog
       SHERLOG_EVENTS_URL: ${SHERLOG_EVENTS_URL:-http://sherlog-api:8200/events}
+      SHERLOG_EVENTS_TOKEN: ${SHERLOG_EVENTS_TOKEN:-}
     ports: ["127.0.0.1:8050:8050"]
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
