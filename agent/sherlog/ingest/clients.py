@@ -114,6 +114,12 @@ class Platform:
         response.raise_for_status()
         return response.text
 
+    async def archive(self, service: str, version: str) -> bytes:
+        """Tarball of the demo app's code (demo-app/ contents, no history) at `version`."""
+        response = await self._http.get(f"/archive/{service}/{version}")
+        response.raise_for_status()
+        return response.content
+
     async def diff(self, service: str, from_version: str, to_version: str) -> str:
         response = await self._http.get(
             f"/diff/{service}", params={"from_version": from_version, "to_version": to_version}

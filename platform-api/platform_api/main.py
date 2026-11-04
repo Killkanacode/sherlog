@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 from platform_api import docker_ops, gitrepo
@@ -254,6 +254,12 @@ def source(service: str, version: str, path: str):
         return gitrepo.show(sha, path)
     except gitrepo.GitError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/archive/{service}/{version}")
+def archive(service: str, version: str):
+    """The demo app's code (demo-app/, no history) as deployed at `version`, as a tarball."""
+    return Response(gitrepo.archive(sha_for(service, version)), media_type="application/x-tar")
 
 
 @app.get("/diff/{service}", response_class=PlainTextResponse)
