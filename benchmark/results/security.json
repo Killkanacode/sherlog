@@ -1,0 +1,218 @@
+[
+ {
+  "check": "console page loads",
+  "got": 200,
+  "expected": 200,
+  "ok": true
+ },
+ {
+  "check": "liveness is public",
+  "got": 200,
+  "expected": 200,
+  "ok": true
+ },
+ {
+  "check": "anonymous GET /api/incidents refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "anonymous GET /api/status refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "anonymous GET /api/stream refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "anonymous GET /api/postmortems refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "anonymous GET /chaos/scenarios refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "anonymous GET /prom/api/v1/query_range?query=up&start=0&end=1&step=1 refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "anonymous GET /platform/services refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "anonymous chaos reset refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "anonymous approve on Sherlog's own port refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "anonymous event push refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "a wrong key is refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "viewer reads incidents",
+  "got": 200,
+  "expected": 200,
+  "ok": true
+ },
+ {
+  "check": "viewer reads chaos scenarios",
+  "got": 200,
+  "expected": 200,
+  "ok": true
+ },
+ {
+  "check": "viewer can't reset chaos",
+  "got": 403,
+  "expected": 403,
+  "ok": true
+ },
+ {
+  "check": "viewer can't approve",
+  "got": 403,
+  "expected": 403,
+  "ok": true
+ },
+ {
+  "check": "viewer can't change settings",
+  "got": 403,
+  "expected": 403,
+  "ok": true
+ },
+ {
+  "check": "operator can't change settings",
+  "got": 403,
+  "expected": 403,
+  "ok": true
+ },
+ {
+  "check": "operator can't read the audit log",
+  "got": 403,
+  "expected": 403,
+  "ok": true
+ },
+ {
+  "check": "operator may approve (404: no such incident)",
+  "got": 404,
+  "expected": 404,
+  "ok": true
+ },
+ {
+  "check": "admin reads the audit log",
+  "got": 200,
+  "expected": 200,
+  "ok": true
+ },
+ {
+  "check": "login sets a session",
+  "got": 200,
+  "expected": 200,
+  "ok": true
+ },
+ {
+  "check": "cookie is HttpOnly and SameSite=Strict",
+  "got": true,
+  "expected": true,
+  "ok": true
+ },
+ {
+  "check": "session reads",
+  "got": 200,
+  "expected": 200,
+  "ok": true
+ },
+ {
+  "check": "session write without CSRF header refused",
+  "got": 403,
+  "expected": 403,
+  "ok": true
+ },
+ {
+  "check": "session API write without CSRF header refused",
+  "got": 403,
+  "expected": 403,
+  "ok": true
+ },
+ {
+  "check": "session write with CSRF header allowed",
+  "got": 404,
+  "expected": 404,
+  "ok": true
+ },
+ {
+  "check": "forged cookie refused",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ },
+ {
+  "check": "content-security-policy set",
+  "got": true,
+  "expected": true,
+  "ok": true
+ },
+ {
+  "check": "x-frame-options set",
+  "got": true,
+  "expected": true,
+  "ok": true
+ },
+ {
+  "check": "x-content-type-options set",
+  "got": true,
+  "expected": true,
+  "ok": true
+ },
+ {
+  "check": "referrer-policy set",
+  "got": true,
+  "expected": true,
+  "ok": true
+ },
+ {
+  "check": "server version hidden",
+  "got": false,
+  "expected": false,
+  "ok": true
+ },
+ {
+  "check": "login brute force is rate limited",
+  "got": true,
+  "expected": true,
+  "ok": true
+ },
+ {
+  "check": "revoked key no longer works",
+  "got": 401,
+  "expected": 401,
+  "ok": true
+ }
+]

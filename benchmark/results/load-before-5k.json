@@ -1,0 +1,495 @@
+{
+ "summary": {
+  "label": "before-5k",
+  "seconds": 144,
+  "sherlog_cpu_avg_pct": 4.0,
+  "sherlog_cpu_max_pct": 19.04,
+  "loki_cpu_avg_pct": 6.7,
+  "lines_seen_per_s": 4835,
+  "lines_parsed_per_s": 4835,
+  "lag_s_max": null,
+  "sherlog_mem_end": "84.55MiB"
+ },
+ "samples": [
+  {
+   "t": 0.0,
+   "parsed": 20641249,
+   "seen": 20641249,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.32,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.5,
+     "mem": "365.3MiB"
+    }
+   }
+  },
+  {
+   "t": 4.0,
+   "parsed": 20658782,
+   "seen": 20658782,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.11,
+     "mem": "84.56MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.76,
+     "mem": "367.7MiB"
+    }
+   }
+  },
+  {
+   "t": 8.1,
+   "parsed": 20684800,
+   "seen": 20684800,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.09,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 5.43,
+     "mem": "378.4MiB"
+    }
+   }
+  },
+  {
+   "t": 12.2,
+   "parsed": 20684800,
+   "seen": 20684800,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 15.68,
+     "mem": "84.74MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.65,
+     "mem": "381.5MiB"
+    }
+   }
+  },
+  {
+   "t": 17.2,
+   "parsed": 20710808,
+   "seen": 20710808,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.12,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 17.69,
+     "mem": "390.1MiB"
+    }
+   }
+  },
+  {
+   "t": 22.3,
+   "parsed": 20736830,
+   "seen": 20736830,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 18.57,
+     "mem": "84.65MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.76,
+     "mem": "392.5MiB"
+    }
+   }
+  },
+  {
+   "t": 27.3,
+   "parsed": 20762842,
+   "seen": 20762842,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.16,
+     "mem": "84.79MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 18.91,
+     "mem": "387.9MiB"
+    }
+   }
+  },
+  {
+   "t": 32.4,
+   "parsed": 20788863,
+   "seen": 20788863,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 5.56,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 16.09,
+     "mem": "376.7MiB"
+    }
+   }
+  },
+  {
+   "t": 37.4,
+   "parsed": 20814871,
+   "seen": 20814871,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.11,
+     "mem": "84.8MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 3.06,
+     "mem": "386.3MiB"
+    }
+   }
+  },
+  {
+   "t": 41.5,
+   "parsed": 20840883,
+   "seen": 20840883,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.09,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.45,
+     "mem": "392.4MiB"
+    }
+   }
+  },
+  {
+   "t": 45.5,
+   "parsed": 20866901,
+   "seen": 20866901,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.37,
+     "mem": "84.81MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.77,
+     "mem": "388.9MiB"
+    }
+   }
+  },
+  {
+   "t": 50.6,
+   "parsed": 20892926,
+   "seen": 20892926,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.14,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 3.16,
+     "mem": "390MiB"
+    }
+   }
+  },
+  {
+   "t": 55.7,
+   "parsed": 20918934,
+   "seen": 20918934,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.37,
+     "mem": "84.8MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 4.36,
+     "mem": "394.3MiB"
+    }
+   }
+  },
+  {
+   "t": 59.7,
+   "parsed": 20938934,
+   "seen": 20938934,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 1.39,
+     "mem": "84.82MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 5.46,
+     "mem": "396.4MiB"
+    }
+   }
+  },
+  {
+   "t": 64.8,
+   "parsed": 20944946,
+   "seen": 20944946,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 16.04,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 3.04,
+     "mem": "391.4MiB"
+    }
+   }
+  },
+  {
+   "t": 69.8,
+   "parsed": 20970957,
+   "seen": 20970957,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 1.84,
+     "mem": "84.8MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 16.65,
+     "mem": "396.8MiB"
+    }
+   }
+  },
+  {
+   "t": 74.9,
+   "parsed": 20996975,
+   "seen": 20996975,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.5,
+     "mem": "85.04MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 19.1,
+     "mem": "389.8MiB"
+    }
+   }
+  },
+  {
+   "t": 79.9,
+   "parsed": 21022986,
+   "seen": 21022986,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 15.73,
+     "mem": "85.13MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.75,
+     "mem": "396.8MiB"
+    }
+   }
+  },
+  {
+   "t": 85.0,
+   "parsed": 21049006,
+   "seen": 21049006,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 5.29,
+     "mem": "84.79MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 14.17,
+     "mem": "402.8MiB"
+    }
+   }
+  },
+  {
+   "t": 90.0,
+   "parsed": 21075029,
+   "seen": 21075029,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.09,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 18.69,
+     "mem": "399MiB"
+    }
+   }
+  },
+  {
+   "t": 95.1,
+   "parsed": 21101036,
+   "seen": 21101036,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 19.04,
+     "mem": "85.04MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.66,
+     "mem": "399.1MiB"
+    }
+   }
+  },
+  {
+   "t": 100.2,
+   "parsed": 21126548,
+   "seen": 21126548,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.11,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 7.81,
+     "mem": "401.2MiB"
+    }
+   }
+  },
+  {
+   "t": 104.2,
+   "parsed": 21153067,
+   "seen": 21153067,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.18,
+     "mem": "84.8MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.72,
+     "mem": "404.5MiB"
+    }
+   }
+  },
+  {
+   "t": 109.3,
+   "parsed": 21179081,
+   "seen": 21179081,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.13,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.42,
+     "mem": "399.1MiB"
+    }
+   }
+  },
+  {
+   "t": 114.3,
+   "parsed": 21205093,
+   "seen": 21205093,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.27,
+     "mem": "84.56MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 4.68,
+     "mem": "398.9MiB"
+    }
+   }
+  },
+  {
+   "t": 119.4,
+   "parsed": 21231614,
+   "seen": 21231614,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.14,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.78,
+     "mem": "402.3MiB"
+    }
+   }
+  },
+  {
+   "t": 124.4,
+   "parsed": 21257624,
+   "seen": 21257624,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.57,
+     "mem": "84.8MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.05,
+     "mem": "407MiB"
+    }
+   }
+  },
+  {
+   "t": 129.5,
+   "parsed": 21283638,
+   "seen": 21283638,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 1.55,
+     "mem": "85.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 6.67,
+     "mem": "410.5MiB"
+    }
+   }
+  },
+  {
+   "t": 134.5,
+   "parsed": 21309646,
+   "seen": 21309646,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 0.11,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.75,
+     "mem": "417MiB"
+    }
+   }
+  },
+  {
+   "t": 138.6,
+   "parsed": 21309646,
+   "seen": 21309646,
+   "lag_s": null,
+   "stats": {
+    "sherlog-sherlog-api-1": {
+     "cpu": 15.51,
+     "mem": "84.55MiB"
+    },
+    "sherlog-loki-1": {
+     "cpu": 2.86,
+     "mem": "419.1MiB"
+    }
+   }
+  }
+ ]
+}
