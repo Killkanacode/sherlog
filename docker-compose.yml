@@ -6,12 +6,15 @@ name: sherlog
 #   platform  — the deploy platform API, shared with Sherlog
 #   chaos     — fault injection; Sherlog is never attached to it
 #   sherlog   — Sherlog and its own database
+#   fixer     — Sherlog and the fixer only (the fixer reaches nothing else
+#               inside; it goes out to the Meta API and GitHub)
 networks:
   app:
   obs:
   platform:
   chaos:
   sherlog:
+  fixer:
 
 # Config files are mounted as directories (not single files) so edits on the
 # host are picked up on restart.
@@ -181,7 +184,7 @@ services:
     image: sherlog/agent:dev
     restart: unless-stopped
     mem_limit: 512m
-    networks: [obs, platform, sherlog]
+    networks: [obs, platform, sherlog, fixer]
     environment:
       SHERLOG_DATABASE_URL: postgresql+asyncpg://sherlog:${SHERLOG_DB_PASSWORD:-sherlog}@sherlog-db:5432/sherlog
       PROMETHEUS_URL: http://prometheus:9090
@@ -228,6 +231,9 @@ services:
       SHERLOG_EVENTS_TOKEN: ${SHERLOG_EVENTS_TOKEN:-}
       SHERLOG_SECURE_COOKIES: ${SHERLOG_SECURE_COOKIES:-false}
       SHERLOG_CORS_ORIGINS: ${SHERLOG_CORS_ORIGINS:-}
+      # Fixer: Muse Code writes a fix PR for code bugs (empty URL = off)
+      FIXER_URL: ${FIXER_URL:-http://sherlog-fixer:8400}
+      MODEL_INVESTIGATOR_PRICE_CACHED: ${MODEL_INVESTIGATOR_PRICE_CACHED:-}
     read_only: true
     tmpfs: [/tmp]
     cap_drop: [ALL]
@@ -235,6 +241,39 @@ services:
     ports: ["127.0.0.1:8200:8200"]
     depends_on:
       sherlog-db: {condition: service_healthy}
+
+  # Writes fix PRs with Muse Code. Muse Code's sandbox (bubblewrap) needs user
+  # namespaces and its own /proc, hence the relaxed seccomp/apparmor/systempaths
+  # here; in exchange every command the agent runs is sandboxed without network.
+  # The service runs as root only to start the agent as another user (SETUID/
+  # SETGID), hand it the workspace (CHOWN) and stop it on timeout (KILL); the
+  # agent can't read the GitHub token in root's environment.
+  sherlog-fixer:
+    build:
+      context: ./fixer
+      additional_contexts:
+        demoapp: ./demo-app
+    image: sherlog/fixer:dev
+    restart: unless-stopped
+    mem_limit: 2g
+    networks: [fixer]
+    environment:
+      META_API_KEY: ${META_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      DEMO_APP_REPO: ${DEMO_APP_REPO:-}
+      FIXER_MODEL: ${FIXER_MODEL:-muse-spark-1.3}
+      FIXER_REASONING: ${FIXER_REASONING:-medium}
+      FIXER_MAX_STEPS: ${FIXER_MAX_STEPS:-60}
+      FIXER_TIMEOUT_S: ${FIXER_TIMEOUT_S:-900}
+      FIXER_DRY_RUN: ${FIXER_DRY_RUN:-false}
+    tmpfs: ["/work:size=512m,mode=0711", "/tmp:size=256m"]
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, CHOWN, KILL]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=unconfined
+      - apparmor=unconfined
+      - systempaths=unconfined
 
   sherlog-db:
     image: postgres:17-alpine
