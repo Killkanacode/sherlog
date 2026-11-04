@@ -33,6 +33,7 @@ URL_CREDENTIALS_RE = re.compile(r"(://[^:/@]+:)[^@]+@")
 
 store = Store(os.environ.get("STATE_PATH", "/data/state.json"))
 EVENTS_URL = os.environ.get("SHERLOG_EVENTS_URL", "")
+EVENTS_TOKEN = os.environ.get("SHERLOG_EVENTS_TOKEN", "")
 locks = {name: threading.Lock() for name in MANAGED + DATASTORES}
 
 
@@ -73,7 +74,10 @@ def push_event(event: dict) -> None:
     if not EVENTS_URL:
         return
     try:
-        httpx.post(EVENTS_URL, json=event, timeout=2.0)
+        headers = {"Authorization": f"Bearer {EVENTS_TOKEN}"} if EVENTS_TOKEN else {}
+        response = httpx.post(EVENTS_URL, json=event, headers=headers, timeout=2.0)
+        if response.status_code >= 400:
+            log.warning("Sherlog refused event %s: HTTP %d (it will still pull it)", event["id"], response.status_code)
     except httpx.HTTPError as exc:
         log.warning("Could not deliver event %s to Sherlog: %s", event["id"], exc)
 
