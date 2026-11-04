@@ -23,6 +23,8 @@ Emit = Callable[[str, str, dict], Awaitable[None]]
 
 MAX_PARALLEL_TOOLS = 4
 BUDGET_MARGIN = 0.85  # stop calling tools once this share of the token budget is spent
+# Per-turn cap on reasoning plus visible output (Muse Spark reasons first).
+TURN_TOKENS = 8192
 
 SYSTEM = f"""You are Sherlog, an autonomous on-call SRE investigating a live production incident.
 
@@ -101,7 +103,7 @@ async def investigate(
         if usage.total_tokens >= settings.token_budget * BUDGET_MARGIN:
             await emit("budget", f"Token budget nearly spent ({usage.total_tokens:,} tokens); concluding", {})
             break
-        completion = await model.complete(messages, tools=specs(), max_tokens=2048)
+        completion = await model.complete(messages, tools=specs(), max_tokens=TURN_TOKENS)
         await usage.record("investigator", model, completion)
 
         if not completion.tool_calls:
@@ -137,7 +139,7 @@ async def investigate(
     # diagnosis once more with structured output and no tools.
     messages.append({"role": "user", "content": "Stop investigating. Reply now with the final JSON diagnosis."})
     try:
-        completion = await model.complete(messages, schema=json_schema(Diagnosis), max_tokens=2048)
+        completion = await model.complete(messages, schema=json_schema(Diagnosis), max_tokens=TURN_TOKENS)
         await usage.record("investigator", model, completion)
         return parse(Diagnosis, completion.content).model_dump()
     except (LLMError, ValueError) as exc:

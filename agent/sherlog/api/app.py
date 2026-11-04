@@ -143,7 +143,7 @@ async def status(principal: Principal = viewer):
         **policy.to_dict(),
         "user": principal.to_dict(),
         "logs": log_detector.stats(),
-        "models": {"breaker": breaker.state(), "budget": await budget.state(),
+        "models": {"roles": llm.describe(), "breaker": breaker.state(), "budget": await budget.state(),
                    "max_concurrent_investigations": settings.max_concurrent_investigations},
     }
 

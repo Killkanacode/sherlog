@@ -1,10 +1,16 @@
 """HTTP client for a chat-completions style API.
 
-TODO(VERIFY): everything about the wire format below is an assumption until
-it is checked against Meta's official docs: the `/chat/completions` path, the
-bearer-token header, the tool and tool-call shapes, `response_format` with a
-JSON schema, and the `usage` field names. Only this file should need to
-change once the docs confirm or correct them.
+Checked against Meta's Model API docs (dev.meta.ai/docs, 2026-11-04) and a
+live call to muse-spark-1.3: `POST {base}/chat/completions` with a bearer
+token; OpenAI-style tools and tool calls (several per turn); structured output
+through `response_format` of type `json_schema`; usage in `prompt_tokens` and
+`completion_tokens`.
+
+Muse Spark always reasons before it answers, and `max_completion_tokens`
+caps reasoning plus visible output together, so limits must leave room for
+both. `reasoning_effort` (minimal..max; reasoning can't be turned off) trades
+depth for latency. Partner endpoints for Muse Spark Open are OpenAI-compatible
+too, but may not accept `reasoning_effort`, so it is only sent when set.
 """
 
 import asyncio
@@ -25,15 +31,16 @@ RETRIES = 2
 class ChatCompletionsModel:
     def __init__(
         self, base_url: str, api_key: str, model: str, *, timeout_s: float,
-        price_in: float | None = None, price_out: float | None = None,
+        price_in: float | None = None, price_out: float | None = None, reasoning_effort: str = "",
     ) -> None:
         if not base_url or not api_key or not model:
             raise LLMError(f"model {model or '<unset>'} needs a base URL, an API key and a model ID")
         self.model = model
         self.price_in, self.price_out = price_in, price_out
+        self.reasoning_effort = reasoning_effort
         self._http = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
-            headers={"Authorization": f"Bearer {api_key}"},  # TODO(VERIFY): auth header
+            headers={"Authorization": f"Bearer {api_key}"},
             timeout=timeout_s,
         )
 
@@ -45,20 +52,26 @@ class ChatCompletionsModel:
         schema: dict | None = None,
         max_tokens: int = 2048,
     ) -> Completion:
-        body: dict = {"model": self.model, "messages": [_to_wire(m) for m in messages], "max_tokens": max_tokens}
+        # `max_tokens` is deprecated on the Meta API; the cap includes reasoning.
+        body: dict = {
+            "model": self.model, "messages": [_to_wire(m) for m in messages], "max_completion_tokens": max_tokens,
+        }
+        if self.reasoning_effort:
+            body["reasoning_effort"] = self.reasoning_effort
         if tools:
-            # TODO(VERIFY): tool definition format and tool_choice support.
             body["tools"] = [{"type": "function", "function": tool} for tool in tools]
             body["tool_choice"] = "auto"
         if schema:
-            # TODO(VERIFY): structured output support and its parameter name.
+            # Output follows the schema either way; strict only adds server-side
+            # validation of the schema itself, which would turn a schema quirk
+            # into an HTTP 400 in the middle of an incident.
             body["response_format"] = {
                 "type": "json_schema",
-                "json_schema": {"name": "response", "schema": schema, "strict": True},
+                "json_schema": {"name": "response", "schema": schema, "strict": False},
             }
 
         started = time.monotonic()
-        data = await self._post("/chat/completions", body)  # TODO(VERIFY): path
+        data = await self._post("/chat/completions", body)
         latency_ms = (time.monotonic() - started) * 1000
         try:
             message = data["choices"][0]["message"]

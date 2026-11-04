@@ -42,16 +42,21 @@ class Settings:
     incident_window_s: int = _int("SHERLOG_INCIDENT_WINDOW_S", 120)
     resolve_quiet_s: int = _int("SHERLOG_RESOLVE_QUIET_S", 90)
 
-    # Models. Endpoints, auth and IDs are TODO(VERIFY) against Meta's docs; with
-    # SHERLOG_FAKE_LLM=true no model API is called (local development only).
+    # Models (Meta Model API, dev.meta.ai/docs). With SHERLOG_FAKE_LLM=true no
+    # model API is called (local development only).
     fake_llm: bool = _bool("SHERLOG_FAKE_LLM", False)
     llm_timeout_s: float = _float("SHERLOG_LLM_TIMEOUT_S", 90.0)
-    meta_api_base_url: str = os.environ.get("META_API_BASE_URL", "")
+    meta_api_base_url: str = os.environ.get("META_API_BASE_URL") or "https://api.meta.ai/v1"
     meta_api_key: str = os.environ.get("META_API_KEY", "")
-    model_investigator: str = os.environ.get("MODEL_INVESTIGATOR", "")
+    model_investigator: str = os.environ.get("MODEL_INVESTIGATOR") or "muse-spark-1.3"
+    # minimal | low | medium | high | xhigh | max; Muse Spark can't skip reasoning.
+    investigator_reasoning: str = os.environ.get("MODEL_INVESTIGATOR_REASONING") or "low"
+    # Muse Spark Open on a partner (Baseten, Modal, ...). Until it is set,
+    # triage runs on Muse Spark at minimal reasoning.
     open_model_base_url: str = os.environ.get("OPEN_MODEL_BASE_URL", "")
     open_model_api_key: str = os.environ.get("OPEN_MODEL_API_KEY", "")
     open_model_id: str = os.environ.get("OPEN_MODEL_ID", "")
+    open_model_reasoning: str = os.environ.get("OPEN_MODEL_REASONING", "")
     # USD per million tokens; unset means "unknown" and cost is reported as null.
     price_investigator_in: float | None = _price("MODEL_INVESTIGATOR_PRICE_IN")
     price_investigator_out: float | None = _price("MODEL_INVESTIGATOR_PRICE_OUT")
@@ -70,7 +75,7 @@ class Settings:
     # Investigation
     investigate: bool = _bool("SHERLOG_INVESTIGATE", True)
     max_steps: int = _int("SHERLOG_MAX_STEPS", 12)
-    token_budget: int = _int("SHERLOG_TOKEN_BUDGET_PER_INCIDENT", 60000)
+    token_budget: int = _int("SHERLOG_TOKEN_BUDGET_PER_INCIDENT", 100000)
     tool_timeout_s: float = _float("SHERLOG_TOOL_TIMEOUT_S", 20.0)
 
     # Actions. Autonomy and dry run are only the defaults: PUT /settings changes
