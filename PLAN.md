@@ -443,6 +443,16 @@ Fechas en 2026, hora de Ecuador. Cada fase termina con sus criterios de aceptaci
 - **Acepta si:** toda la demo se puede hacer desde el navegador, sin terminal.
 - **Estado (4 nov):** escenario 3 hecho entero desde el navegador con modelos falsos: inyección en el Chaos Lab, detección en 11 s, rollback elegido en la pantalla del incidente, verificación en vivo (recuperado 70 s después) y postmortem. El botón Approve está conectado, pero no se probó en vivo porque los modelos falsos siempre escalan. Extra: pantalla "How it works" con el pipeline y la arquitectura.
 
+### Fase 5b — Miércoles 4 nov: escala y seguridad (pedido de Miguel)
+- [x] Ingesta de logs: Loki cuenta el volumen y filtra WARN+; Sherlog solo procesa esas líneas, con tope por consulta para no atrasarse.
+- [x] Reinicios en caliente: snapshot del detector de logs en Postgres; las plantillas y huellas dejan de ser "nuevas" a las 6 h.
+- [x] Memoria: solo cuentan las huellas y plantillas poco comunes.
+- [x] Modelos: presupuesto mensual, cortacircuitos, cola de investigaciones y redacción de secretos y datos personales.
+- [x] Seguridad: claves con roles (viewer, operator, admin), sesiones firmadas, CSRF, límite de logins, auditoría, nginx con auth_request y cabeceras, eventos autenticados, contenedores endurecidos.
+- [x] Guardarraíles de acciones independientes del modelo: servicio implicado, cambio que corresponda en la evidencia, límite por hora y enfriamiento por servicio; texto con forma de inyección en la telemetría obliga a la aprobación humana.
+- **Decisión:** no se reescribe en Go. El cuello de botella era leer todas las líneas, no el lenguaje; ahora el trabajo por línea lo hace Loki (que está en Go).
+- **Resultados (4 nov):** con 20.000 líneas/s, Sherlog pasó de procesar 16.320 a 19 líneas/s y de 12,8 a 1,0 s de CPU; en una tormenta de errores el retraso se mantuvo en menos de 8 s. Reinicio: de 60 s (releyendo 4,8M líneas y olvidando 32 de 42 plantillas) a 2 s sin perder nada. 36/36 controles de seguridad en vivo y 78 tests pasan. Sin secretos en el historial de git. Las pruebas destaparon y se corrigieron: el aprendizaje ponía a cero cada minuto (error previo), una inundación podía inflar la línea base de volumen (falso silencio), un revert podía volver a desplegar la versión rota encima de un cambio posterior (ahora solo revierte si el servicio sigue como Sherlog lo dejó), un incidente reciente dentro de la ventana de aprendizaje ocultaba el siguiente (ahora las líneas base se siembran con mediana/MAD y cuantiles bajos) y una inyección repetida en una plantilla ya conocida no se marcaba (ahora se revisa cada línea WARN+ al ingerirla).
+
 ### Fase 6 — Lunes 2 nov: benchmark + Muse Code + voz
 - [ ] Runner del benchmark (5.6) y corrida de los 15 escenarios más la línea base.
 - [ ] Ajuste de detectores y prompts donde falle.

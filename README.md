@@ -29,10 +29,14 @@ Requirements: Docker with Compose v2 and ~6 GB of RAM for Docker.
 
 ```bash
 cp .env.example .env      # set GATEWAY_HOST_PORT if 8000 is taken
+echo "SHERLOG_ADMIN_TOKEN=slg_$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" >> .env
 docker compose up -d --build
 ```
 
 First boot seeds one million products, so give inventory ~30 s to become healthy.
+Open the console and sign in with the `SHERLOG_ADMIN_TOKEN` from `.env`. If you
+leave it unset, Sherlog creates an admin key on first start and writes it to
+its log once (`docker compose logs sherlog-api | grep "admin key"`).
 
 Sherlog's investigator calls Meta's models (`META_*` and `OPEN_MODEL_*` in `.env`).
 Without credentials, set `SHERLOG_FAKE_LLM=true` to run the whole pipeline on
@@ -46,7 +50,7 @@ diagnosis.
 | http://localhost:9090 | Prometheus |
 | http://localhost:3100 | Loki API |
 | http://localhost:3200 | Tempo API |
-| http://localhost:8200/incidents | Sherlog API (`/incidents`, `/postmortems`, `/settings`, `/signals`, `/topology`, `/stream`) |
+| http://localhost:8200/incidents | Sherlog API (`/incidents`, `/postmortems`, `/settings`, `/signals`, `/topology`, `/stream`), with `Authorization: Bearer <key>` |
 | http://localhost:8050/services | platform-api |
 | http://localhost:8100/scenarios | chaos-controller (benchmark only; Sherlog can't reach it) |
 | http://localhost:3000 | Grafana (optional: `docker compose --profile debug up -d grafana`) |
@@ -98,9 +102,11 @@ of it continuously:
   latency per dependency, CPU, memory growth and limit, DB pool saturation,
   and datastore failures. Each series is compared with an EWMA baseline
   learned from history, and a signal must persist before it fires.
-- **Logs:** Drain3 templates per service, which detect new templates, spikes
-  and silence. Exceptions are fingerprinted by their own-code frames, so new
-  crash types stand out even when line numbers move.
+- **Logs:** Loki counts every service's lines (for silence) and hands
+  Sherlog only the WARN/ERROR/FATAL lines. Drain3 turns those into templates
+  per service to detect new templates and spikes. Exceptions are
+  fingerprinted by their own-code frames, so new crash types stand out even
+  when line numbers move.
 - **Containers:** restarts, crashes and not-ready replicas, read from
   platform-api.
 
@@ -150,9 +156,10 @@ that haven't been checked against Meta's documentation are marked
 `TODO(VERIFY)`.
 
 ```bash
-curl -s localhost:8200/incidents/<id>             # timeline, triage, diagnosis, llm_calls
-curl -s -X POST localhost:8200/incidents/<id>/investigate
-curl -s -X POST localhost:8200/tools/get_dependencies -H 'content-type: application/json' -d '{"service":"orders"}'
+export KEY=<your API key>; AUTH="Authorization: Bearer $KEY"
+curl -s -H "$AUTH" localhost:8200/incidents/<id>             # timeline, triage, diagnosis, llm_calls
+curl -s -H "$AUTH" -X POST localhost:8200/incidents/<id>/investigate
+curl -s -H "$AUTH" -X POST localhost:8200/tools/get_dependencies -H 'content-type: application/json' -d '{"service":"orders"}'
 ```
 
 ## Mitigation, verification and memory
@@ -198,11 +205,11 @@ Closing an incident does two things:
   confidence isn't stored as knowledge.
 
 ```bash
-curl -s -X POST localhost:8200/incidents/<id>/approve -H 'content-type: application/json' -d '{"actor":"me"}'
-curl -s -X POST localhost:8200/incidents/<id>/actions -H 'content-type: application/json' \
-  -d '{"type":"rollback","params":{"service":"orders"},"actor":"me"}'
-curl -s localhost:8200/incidents/<id>/postmortem   # Markdown
-curl -s -X PUT localhost:8200/settings -H 'content-type: application/json' -d '{"autonomy":"L2","dry_run":false}'
+curl -s -H "$AUTH" -X POST localhost:8200/incidents/<id>/approve           # operator
+curl -s -H "$AUTH" -X POST localhost:8200/incidents/<id>/actions -H 'content-type: application/json' \
+  -d '{"type":"rollback","params":{"service":"orders"}}'                      # operator
+curl -s -H "$AUTH" localhost:8200/incidents/<id>/postmortem                 # Markdown
+curl -s -H "$AUTH" -X PUT localhost:8200/settings -H 'content-type: application/json' -d '{"autonomy":"L2","dry_run":false}'  # admin
 ```
 
 ## Web console
@@ -238,6 +245,132 @@ npm --prefix web install
 npm --prefix web run dev   # http://localhost:5173
 ```
 
+## Production readiness
+
+### Scale: Sherlog's cost follows errors, not log volume
+
+Sherlog doesn't download every log line. Each poll asks Loki to count lines
+per service, which is all that silence detection needs, and to return only
+WARN and above. Both filters run inside Loki. A poll that still brings more
+than 20,000 lines (an error storm) stops there and counts the rest as dropped,
+so the detector never falls behind. Language wasn't the bottleneck: the
+heavy per-line work now happens in Loki, which is written in Go.
+
+`benchmark/load/flood.py` sends synthetic OTLP logs (99.9% INFO) through the
+collector, and `benchmark/load/measure.py` reads Sherlog's CPU from its
+cgroup and its own counters. Both versions ran on the same laptop,
+2026-11-04 (`benchmark/results/load-*.json`):
+
+| 20,000 log lines/s for 2 min | Before | After |
+|---|---|---|
+| Lines Sherlog parsed per second | 16,320 (everything) | 19 (WARN+) |
+| Sherlog CPU time | 12.8 s | 1.0 s (13x less) |
+| Loki CPU (average) | 17.4% | 9.7% |
+| Detection lag (max) | not measured | 8.1 s |
+| Error storm, 30% WARN | not run | 3,670 lines/s parsed, 139k counted as dropped, lag 7.9 s |
+| False "log silence" after the flood | yes, an incident opened | none in the 3 minutes after |
+
+The tests also turned up three bugs, all fixed:
+
+- **Learning zeroed every minute.** While learning, every minute's count was
+  zeroed before it reached the baseline, so log baselines started at zero
+  after each restart.
+- **Floods inflated the volume baseline.** A flood could push the volume
+  baseline up and trigger a false silence. Now a burst counts as at most 3x
+  normal, and a silence alert stops freezing the baseline after 10 minutes.
+- **A recent incident could hide the next one.** If Sherlog restarted right
+  after an incident, it learned that incident as "normal": the next scenario
+  3 run (77% errors on orders) only surfaced 82 s later, through a side
+  effect. Now baselines start from robust statistics of the learning window:
+  metrics from the median and MAD, log counts from a low quantile. Up to half
+  of the window can be an incident.
+
+### Restarts resume where they stopped
+
+The log detector writes its state to Postgres every minute: Drain3 trees,
+templates, fingerprints, baselines and its read position. On restart it
+loads the state and reads only the gap. Before this, Sherlog re-read the last
+10 minutes and forgot everything older.
+
+| Restart after the floods | Before | After |
+|---|---|---|
+| Ready (learning done) | 60 s, re-reading 4.8M lines | 2 s, reading 8 s of gap |
+| Known templates kept | 10 of 42 (the rest would look new) | all |
+
+Templates and fingerprints stop counting as new after 6 hours, so a
+long-lived, flaky dependency becomes part of normal, and only its spikes alert.
+Incident memory now ignores keys that appear in more than 20% of past
+incidents. A match needs a shared exception fingerprint, or at least two
+shared log templates.
+
+### Models: budget, breaker, queue, redaction
+
+- **Monthly budget.** Model calls stop when the month reaches
+  `SHERLOG_MONTHLY_SPEND_LIMIT_USD` or `SHERLOG_MONTHLY_TOKEN_LIMIT`. The
+  incident then escalates.
+- **Circuit breaker.** After 3 consecutive model failures, calls pause for
+  5 minutes, and incidents escalate right away instead of piling up timeouts.
+- **Concurrency.** At most `SHERLOG_MAX_CONCURRENT_INVESTIGATIONS` (default
+  2) investigations run at once. The rest queue.
+- **Redaction.** Everything sent to a model is first scrubbed of emails,
+  card numbers (Luhn-checked), bearer tokens, JWTs, cloud and GitHub keys,
+  private keys, and `password=`/`token:`-style values.
+
+### Security
+
+- **Access.** Every API route except `/health` needs an API key with a role.
+  A **viewer** can read; an **operator** can also approve, reject and run
+  actions and drive the Chaos Lab; an **admin** can also change settings,
+  manage keys and read the audit log. Keys are stored as SHA-256 hashes, and
+  the console exchanges a key for a signed `HttpOnly`, `SameSite=Strict`
+  session. Writes made with that session must carry `X-Requested-With`, which
+  blocks CSRF. Logins are rate-limited.
+- **The actor is the caller.** Approvals and actions are attributed to the
+  key's owner. An `actor` field in the request body is ignored.
+- **Audit.** Every write and every refused request is recorded, with who,
+  what, when, the result and the client IP. Admins see it in Settings.
+- **Console and nginx.** nginx asks Sherlog before proxying the Chaos Lab,
+  Prometheus or platform-api: reads need a viewer and writes an operator. It
+  also sets CSP, `X-Frame-Options`, `nosniff` and `Referrer-Policy`, and hides
+  its version.
+- **Change events.** platform-api pushes them with `SHERLOG_EVENTS_TOKEN`.
+  Sherlog also pulls them every 5 s, so none is lost.
+- **Untrusted telemetry.** Logs, exceptions and commit messages are data,
+  never instructions. The prompts say so. Every WARN+ line is checked at
+  ingest, along with the evidence and tool results, for text that reads like
+  instructions to an AI ("ignore previous instructions…"). A match flags the
+  incident, and nothing then runs without a human's approval. Checking at
+  ingest also catches a repeated injection whose template is already known.
+- **Guardrails that don't trust the model.** An action Sherlog proposes must
+  target a service involved in the incident. A rollback, config revert or
+  flag flip also needs the matching change in the evidence. Automatic runs
+  are limited to 6 per hour, with a 10-minute cooldown per service.
+- **Reverts can't clobber later changes.** A revert runs only if the service
+  is still in the state Sherlog left it in. A load test once failed
+  verification, and Sherlog would otherwise have redeployed the buggy version
+  over a reset that had already fixed it.
+- **Containers.** Sherlog runs as non-root on a read-only filesystem, with
+  all Linux capabilities dropped and `no-new-privileges`.
+- **Secrets.** A scan of the whole git history found no keys or tokens.
+
+`python3 benchmark/security/check.py` runs 36 checks against the live stack
+through the console's nginx. They cover anonymous access, each role, sessions
+and CSRF, forged cookies, headers, brute force and revoked keys. All 36 pass.
+`python3 benchmark/e2e/scenario3.py` runs scenario 3 end to end as an
+operator, with an injection line planted in orders' logs. All 8 checks
+pass: Sherlog detected the fault in 12 s, flagged the planted line, saw the
+rollback recover 70 s later, wrote the postmortem and audited the request.
+
+### Still open
+
+- **One Sherlog instance.** Restarts are warm, but there is no hot standby.
+- **No seasonality.** Baselines don't model daily or weekly patterns.
+- **No SLOs.** There are no SLOs or error-budget alerts yet.
+- **TLS.** The console expects a TLS-terminating proxy in front; set
+  `SHERLOG_SECURE_COOKIES=true` there.
+- **Simulated platform.** The deploy platform is a simulator, so real
+  deployments need Kubernetes or Argo CD and feature-flag integrations.
+
 ## Built during the hackathon
 
 Everything in this repository was written during the hackathon (Oct 27 – Nov 4, 2026). The git history is the record.
@@ -249,6 +382,7 @@ Everything in this repository was written during the hackathon (Oct 27 – Nov 4
 - The model layer, triage, the tool-calling investigator with its ten tools, and diagnosis scoring in the benchmark.
 - Actions with autonomy levels and dry run, the verification loop with automatic revert and re-investigation, incident memory and postmortems.
 - The web console: Live, Incident, Chaos Lab, Postmortems, Settings and How it works, with live streaming.
+- Production hardening: Loki-side log filtering and counting, warm restarts from snapshots, model budget, breaker, queue and redaction, access control with roles, sessions and audit, and action guardrails, with load, security and end-to-end checks.
 
 ## License
 
