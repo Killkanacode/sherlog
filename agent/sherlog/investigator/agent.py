@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from sherlog.config import settings
-from sherlog.investigator.schemas import ACTIONS, CATEGORIES, Diagnosis, json_schema, parse
+from sherlog.investigator.schemas import ACTIONS, CATEGORY_MEANING, Diagnosis, json_schema, parse
 from sherlog.investigator.tools import ToolContext, render, run_tool, specs
 from sherlog.llm import ChatModel, LLMError
 from sherlog.llm.usage import Usage
@@ -43,13 +43,18 @@ How to work:
 - Before each tool call, state your current hypothesis in one sentence.
 - Separate cause from victims: callers of a broken service fail too, and a service that loses traffic
   or goes quiet may only be starved by a broken caller.
+- A dependency the caller sees as slow or timing out while its own server latency stays normal means the
+  time is lost between them (network). Pool exhaustion, queues and retries in a caller that waits on a
+  slow dependency are effects; the root cause is what made the dependency slow.
 - Change events right before the incident are prime suspects, but some changes are harmless noise.
   Confirm with code (diff_deploy, get_code_context), exceptions, traces or metrics before blaming one.
 - Past incidents in the evidence share an exception or a log pattern with this one; what fixed them is
-  a strong lead, but confirm it applies.
+  a strong lead, but confirm it applies. A past diagnosis without diagnosis_verified was never confirmed
+  by a working fix: treat it as someone else's guess, not as evidence.
 - Be efficient: you have at most {settings.max_steps} turns. Stop as soon as the evidence is conclusive.
 
-Categories: {", ".join(CATEGORIES)}.
+Categories:
+{chr(10).join(f"- {name}: {meaning}" for name, meaning in CATEGORY_MEANING.items())}
 recommended_action is the immediate mitigation. Sherlog runs it through the deploy platform, then checks
 that errors and latency are back to baseline, and reverts it if they are not.
 Actions: {", ".join(ACTIONS)}. rollback undoes the service's last deploy (the mitigation for a bug shipped

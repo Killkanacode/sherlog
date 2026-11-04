@@ -16,6 +16,23 @@ CATEGORIES = (
     "db_pool_exhaustion", "network_latency", "network_partition", "dependency_down", "process_crash",
     "process_hang", "retry_storm", "unknown",
 )
+# What each category means, so the model picks between close ones on purpose.
+CATEGORY_MEANING = {
+    "bad_deploy_code_bug": "a recent deploy shipped code that fails",
+    "config_change": "a configuration change or feature flag broke behavior",
+    "memory_exhaustion": "a process runs out of memory (growth, OOM kills)",
+    "cpu_exhaustion": "a process is CPU-bound and slows everything it serves",
+    "db_slow_query": "database queries got slow",
+    "db_pool_exhaustion": "a service runs out of database connections",
+    "network_latency": "calls between services are slow on the network, not in the callee's code",
+    "network_partition": "calls between services fail to connect or are dropped",
+    "dependency_down": "a datastore or other dependency (database, cache, queue, external API) is unavailable",
+    "process_crash": "one of the shop's own services died or keeps restarting",
+    "process_hang": "a service is up but stops answering",
+    "retry_storm": "retries multiply load until it overwhelms a service",
+    "unknown": "the evidence doesn't support any of the above",
+}
+assert set(CATEGORY_MEANING) == set(CATEGORIES)
 ACTIONS = ("rollback", "flag_off", "restart", "scale", "config_revert", "open_fix_pr", "escalate")
 
 

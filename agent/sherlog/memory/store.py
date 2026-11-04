@@ -105,6 +105,9 @@ def _public(row: dict) -> dict:
         "category": row["category"],
         "summary": row["summary"],
         "outcome": row["outcome"],
+        # Only a fix that restored service confirms the diagnosis; an escalated
+        # incident's diagnosis was never checked and may be wrong.
+        "diagnosis_verified": row["outcome"] == "fixed_by_action",
         "action": row["action"],
         "resolve_s": row["resolve_s"],
         "shared_fingerprints": row.get("shared_fingerprints", 0),

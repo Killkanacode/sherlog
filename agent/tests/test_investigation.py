@@ -151,6 +151,23 @@ def test_fake_triage_output_matches_schema():
     assert {s.service: s.assessment for s in triage.services}["payments"] == "likely_cause"
 
 
+def test_dependencies_show_latency_on_both_ends(monkeypatch):
+    async def query(promql):
+        if "http_client_duration" in promql:
+            return [{"metric": {"job": "orders", "peer": "payments"}, "value": [0, "2.4"]}]
+        return [{"metric": {"job": "payments"}, "value": [0, "0.02"]}, {"metric": {"job": "orders"}, "value": [0, "NaN"]}]
+
+    monkeypatch.setattr(tools.prometheus, "query", query)
+    monkeypatch.setattr(tools.topology, "edges", {("orders", "payments"): {"rps": 5.0, "error_rate": 0.0}})
+    result = run(tools.get_dependencies(tools.ToolContext(7, None), service="orders"))
+    assert result["calls"][0] | {"anomalous": False} == {
+        "service": "payments", "rps": 5.0, "error_rate": 0.0, "anomalous": False,
+        "p95_s_seen_by_caller": 2.4, "p95_s_at_callee": 0.02,
+    }
+    called_by = run(tools.get_dependencies(tools.ToolContext(7, None), service="payments"))["called_by"][0]
+    assert called_by["service"] == "orders" and called_by["p95_s_at_callee"] == 0.02
+
+
 def test_tool_arguments_are_checked_before_running():
     ctx = tools.ToolContext(7, None)
     assert "unknown tool" in run(tools.run_tool(ctx, "rm_rf", {}))["error"]

@@ -362,24 +362,43 @@ async def diff_deploy(ctx: ToolContext, service: str, from_version: str, to_vers
     }
 
 
+CALLER_P95 = "histogram_quantile(0.95, sum by (job, peer, le) (rate(http_client_duration_seconds_bucket[1m])))"
+CALLEE_P95 = "histogram_quantile(0.95, sum by (job, le) (rate(http_server_duration_seconds_bucket[1m])))"
+
+
+def _seconds(raw: str) -> float | None:
+    value = float(raw)
+    return round(value, 3) if value == value and value not in (float("inf"), float("-inf")) else None
+
+
 @tool(
     "A service's neighbours in the live dependency graph (from traces): what it calls and what calls it, "
-    "with request rate, error rate and whether each neighbour is currently anomalous.",
+    "with request rate, error rate, whether each neighbour is currently anomalous, and the p95 latency of "
+    "each call as the caller measures it next to the callee's own p95 for the requests it serves.",
     service=(ANY_SERVICE, True),
 )
 async def get_dependencies(ctx: ToolContext, service: str):
-    def edge(other: str, stats: dict) -> dict:
-        return {
+    caller_rows, callee_rows = await asyncio.gather(prometheus.query(CALLER_P95), prometheus.query(CALLEE_P95))
+    caller = {(r["metric"].get("job"), r["metric"].get("peer")): _seconds(r["value"][1]) for r in caller_rows}
+    callee = {r["metric"].get("job"): _seconds(r["value"][1]) for r in callee_rows}
+
+    def edge(client: str, server: str, stats: dict, other: str) -> dict:
+        item = {
             "service": other,
             "rps": stats.get("rps"),
             "error_rate": stats.get("error_rate"),
             "anomalous": bool(bus.active_for(other)),
         }
+        if (client, server) in caller:
+            item["p95_s_seen_by_caller"] = caller[(client, server)]
+        if server in callee:
+            item["p95_s_at_callee"] = callee[server]
+        return item
 
     return {
         "service": service,
-        "calls": [edge(server, s) for (client, server), s in topology.edges.items() if client == service],
-        "called_by": [edge(client, s) for (client, server), s in topology.edges.items() if server == service],
+        "calls": [edge(c, s, st, s) for (c, s), st in topology.edges.items() if c == service],
+        "called_by": [edge(c, s, st, c) for (c, s), st in topology.edges.items() if s == service],
     }
 
 
