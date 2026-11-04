@@ -4,11 +4,13 @@ import { ago, between, duration } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { categoryOf, statusOf } from "../lib/labels";
 import { href } from "../lib/router";
+import { useSession } from "../lib/session";
 import type { IncidentSummary } from "../lib/types";
 import { Badge, Button, cx, Empty } from "./ui";
 
 export function LiveIncidentCard({ incident, onChange }: { incident: IncidentSummary; onChange?: () => void }) {
   const now = useNow();
+  const { can } = useSession();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const status = statusOf(incident.status);
@@ -20,7 +22,7 @@ export function LiveIncidentCard({ incident, onChange }: { incident: IncidentSum
     setBusy(true);
     setError(null);
     try {
-      await post(`${API}/incidents/${incident.id}/approve`, { actor: "on-call" });
+      await post(`${API}/incidents/${incident.id}/approve`, {});
       onChange?.();
     } catch (e) {
       setError((e as Error).message);
@@ -67,7 +69,7 @@ export function LiveIncidentCard({ incident, onChange }: { incident: IncidentSum
           <div className="min-w-0 flex-1 truncate text-[13px] text-ink-2">
             <span className="text-brass">Proposed:</span> {pending.description}
           </div>
-          {pending.state === "awaiting_approval" && (
+          {pending.state === "awaiting_approval" && can("operator") && (
             <Button variant="go" size="sm" disabled={busy} onClick={approve}>
               Approve
             </Button>

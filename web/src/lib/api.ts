@@ -15,11 +15,15 @@ export class ApiError extends Error {
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: init?.body ? { "content-type": "application/json" } : undefined,
-  });
+  // The session cookie rides along (same origin); X-Requested-With is what
+  // Sherlog requires on cookie-authenticated writes, against CSRF.
+  const headers: Record<string, string> = { "x-requested-with": "sherlog" };
+  if (init?.body) headers["content-type"] = "application/json";
+  const response = await fetch(url, { ...init, headers });
   const text = await response.text();
+  if (response.status === 401 && !url.endsWith("/auth/login")) {
+    window.dispatchEvent(new Event("sherlog:unauthorized"));
+  }
   if (!response.ok) {
     let detail: unknown = text;
     try {
@@ -39,6 +43,8 @@ export const post = <T>(url: string, body?: unknown) =>
   request<T>(url, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
 
 export const put = <T>(url: string, body: unknown) => request<T>(url, { method: "PUT", body: JSON.stringify(body) });
+
+export const del = <T>(url: string) => request<T>(url, { method: "DELETE" });
 
 export type Point = { t: number; v: number | null };
 export type Series = { labels: Record<string, string>; points: Point[] };

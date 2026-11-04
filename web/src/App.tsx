@@ -1,15 +1,18 @@
+import { useEffect, useState } from "react";
 import { Mark } from "./components/Logo";
 import { Toasts } from "./components/Toasts";
 import { cx, Dot } from "./components/ui";
-import { API, get } from "./lib/api";
+import { API, get, post } from "./lib/api";
 import { usePoll } from "./lib/hooks";
 import { href, useRoute } from "./lib/router";
-import { useStream, useStreamStatus } from "./lib/stream";
+import { SessionContext, type Me } from "./lib/session";
+import { startStream, stopStream, useStream, useStreamStatus } from "./lib/stream";
 import type { Health } from "./lib/types";
 import { ChaosLab } from "./pages/ChaosLab";
 import { HowItWorks } from "./pages/HowItWorks";
 import { IncidentPage } from "./pages/Incident";
 import { Live } from "./pages/Live";
+import { Login } from "./pages/Login";
 import { Postmortems } from "./pages/Postmortems";
 import { Settings } from "./pages/Settings";
 
@@ -22,9 +25,40 @@ const NAV = [
 ];
 
 export function App() {
+  const [me, setMe] = useState<Me | null | undefined>(undefined);
+
+  useEffect(() => {
+    get<Me>(`${API}/auth/me`).then(setMe, () => setMe(null));
+    const signedOut = () => {
+      stopStream();
+      setMe(null);
+    };
+    window.addEventListener("sherlog:unauthorized", signedOut);
+    return () => window.removeEventListener("sherlog:unauthorized", signedOut);
+  }, []);
+
+  if (me === undefined) return null;
+  if (me === null) return <Login onSignedIn={setMe} />;
+  startStream();
+  return (
+    <SessionContext.Provider value={me}>
+      <Console
+        me={me}
+        onSignOut={() => {
+          post(`${API}/auth/logout`).finally(() => {
+            stopStream();
+            setMe(null);
+          });
+        }}
+      />
+    </SessionContext.Provider>
+  );
+}
+
+function Console({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const route = useRoute();
   const section = route[0] ?? "live";
-  const health = usePoll(() => get<Health>(`${API}/health`), 10000);
+  const health = usePoll(() => get<Health>(`${API}/status`), 10000);
   const connected = useStreamStatus();
   useStream((m) => m.type === "settings" && health.refresh());
 
@@ -86,6 +120,13 @@ export function App() {
                 {h.dry_run && <span className="text-info">DRY RUN</span>}
               </a>
             )}
+            <span className="flex items-center gap-2 border-l border-line pl-4">
+              <span className="text-ink-2">{me.name}</span>
+              <span className="font-mono text-[11px] text-faint uppercase">{me.role}</span>
+              <button onClick={onSignOut} className="ml-1 text-muted hover:text-ink">
+                Sign out
+              </button>
+            </span>
           </div>
         </div>
       </header>

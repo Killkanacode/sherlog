@@ -246,6 +246,7 @@ export type Stats = {
   incidents_total: number;
   incidents_open: number;
   log_lines_seen: number;
+  log_lines_parsed?: number;
   log_templates: number;
   exception_fingerprints: number;
   funnel: { log_lines_in_windows: number; estimated_tokens: number };

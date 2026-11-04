@@ -10,11 +10,13 @@ import { between, clock, dateTime, duration, money, num } from "../lib/format";
 import { useDebounced, useNow, usePoll } from "../lib/hooks";
 import { categoryOf, SERVICES, statusOf } from "../lib/labels";
 import { href } from "../lib/router";
+import { useSession } from "../lib/session";
 import { useStream } from "../lib/stream";
 import type { IncidentDetail, Topology } from "../lib/types";
 
 export function IncidentPage({ id }: { id: number }) {
   const now = useNow();
+  const { can } = useSession();
   const incident = usePoll(() => get<IncidentDetail>(`${API}/incidents/${id}`), 5000, [id]);
   const refresh = useDebounced(incident.refresh, 300);
   useStream((m) => {
@@ -55,7 +57,7 @@ export function IncidentPage({ id }: { id: number }) {
             {status.label}
           </Badge>
           <div className="ml-auto flex gap-2">
-            {live && !busy && (
+            {live && !busy && can("operator") && (
               <Button size="sm" onClick={() => post(`${API}/incidents/${id}/investigate`).then(incident.refresh, incident.refresh)}>
                 Investigate again
               </Button>

@@ -84,7 +84,11 @@ export function Live() {
           </p>
         </div>
         <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
-          <Stat label="Log lines read" value={compact(s?.log_lines_seen)} sub={`${num(s?.log_templates)} patterns learned`} />
+          <Stat
+            label="Log lines watched"
+            value={compact(s?.log_lines_seen)}
+            sub={`${compact(s?.log_lines_parsed)} WARN+ read by Sherlog`}
+          />
           <Stat label="Exception types" value={num(s?.exception_fingerprints)} sub="fingerprinted by code" />
           <Stat
             label="Sent to models"

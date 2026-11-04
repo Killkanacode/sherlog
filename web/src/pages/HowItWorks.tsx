@@ -10,7 +10,12 @@ const STAGES: { n: string; name: string; engine: string; llm?: boolean; lines: s
     n: "01",
     name: "Detect",
     engine: "No LLM",
-    lines: ["EWMA baselines on RED metrics", "Drain3 log patterns", "Exception fingerprints", "Container state"],
+    lines: [
+      "EWMA baselines on RED metrics",
+      "Log volume counted inside Loki; only WARN+ lines read",
+      "Drain3 patterns, exception fingerprints",
+      "Container state",
+    ],
   },
   {
     n: "02",
@@ -105,8 +110,10 @@ export function HowItWorks() {
         </Panel>
         <Panel title="Right now">
           <dl className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-3 text-[13px]">
-            <dt className="text-muted">Log lines read</dt>
+            <dt className="text-muted">Log lines watched</dt>
             <dd className="num font-mono text-ink">{compact(s?.log_lines_seen)}</dd>
+            <dt className="text-muted">WARN+ lines read by Sherlog</dt>
+            <dd className="num font-mono text-ink">{compact(s?.log_lines_parsed)}</dd>
             <dt className="text-muted">Log patterns learned</dt>
             <dd className="num font-mono text-ink">{num(s?.log_templates)}</dd>
             <dt className="text-muted">Exception fingerprints</dt>
@@ -176,7 +183,8 @@ function Architecture() {
         </div>
         <div className="mt-4 text-[12px] leading-snug text-muted">
           Read-only access to telemetry, deploy history and code. Write access only through the platform's action
-          API, on a whitelist of services.
+          API, on a whitelist of services, after safety checks. Every person signs in with a role (viewer, operator,
+          admin) and every write is audited.
         </div>
       </div>
     </div>

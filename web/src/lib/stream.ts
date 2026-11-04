@@ -29,8 +29,23 @@ function open() {
   }
 }
 
-export function subscribe(listener: Listener): () => void {
+let enabled = false;
+
+/** Opens the stream; called once signed in (it needs the session cookie). */
+export function startStream() {
+  enabled = true;
   if (!source) open();
+}
+
+export function stopStream() {
+  enabled = false;
+  source?.close();
+  source = null;
+  setConnected(false);
+}
+
+export function subscribe(listener: Listener): () => void {
+  if (enabled && !source) open();
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
@@ -45,7 +60,7 @@ export function useStream(handler: Listener) {
 export function useStreamStatus(): boolean {
   const [value, setValue] = useState(connected);
   useEffect(() => {
-    if (!source) open();
+    if (enabled && !source) open();
     statusListeners.add(setValue);
     return () => {
       statusListeners.delete(setValue);

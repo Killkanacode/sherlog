@@ -6,6 +6,7 @@ import { API, CHAOS, get, post } from "../lib/api";
 import { between, duration, ms } from "../lib/format";
 import { useDebounced, useNow, usePoll } from "../lib/hooks";
 import { categoryOf } from "../lib/labels";
+import { useSession } from "../lib/session";
 import { useStream } from "../lib/stream";
 import type { ChaosRun, IncidentSummary, Scenario, Topology } from "../lib/types";
 import { useVersions } from "./Live";
@@ -27,6 +28,8 @@ export function ChaosLab() {
   const incidents = usePoll(() => get<IncidentSummary[]>(`${API}/incidents`), 5000);
   const topology = usePoll(() => get<Topology>(`${API}/topology`), 4000);
   const { versions } = useVersions();
+  const { can } = useSession();
+  const operator = can("operator");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
@@ -89,7 +92,7 @@ export function ChaosLab() {
             only from telemetry, deploy events and source code.
           </p>
         </div>
-        <Button variant="danger" onClick={reset} disabled={busy === "reset"}>
+        <Button variant="danger" onClick={reset} disabled={busy === "reset" || !operator} title={operator ? undefined : "Needs the operator role"}>
           {busy === "reset" ? "Resetting…" : "Reset to baseline"}
         </Button>
       </div>
@@ -177,8 +180,8 @@ export function ChaosLab() {
                     size="sm"
                     variant={active ? "default" : "primary"}
                     className="ml-auto"
-                    disabled={!!active || busy !== null}
-                    title={active ? "Reset the current run first" : undefined}
+                    disabled={!!active || busy !== null || !operator}
+                    title={!operator ? "Needs the operator role" : active ? "Reset the current run first" : undefined}
                     onClick={() => inject(s.id)}
                   >
                     {busy === s.id ? "Injecting…" : active?.scenario_id === s.id ? "Running" : "Inject"}

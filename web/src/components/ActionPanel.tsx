@@ -3,6 +3,7 @@ import { API, get, PLATFORM, post } from "../lib/api";
 import { between, duration } from "../lib/format";
 import { useNow } from "../lib/hooks";
 import { ACTION_TYPES, actionStateOf, DATASTORES, describeProblem, SERVICES } from "../lib/labels";
+import { useSession } from "../lib/session";
 import { useStream } from "../lib/stream";
 import type { Action, IncidentDetail, Problem } from "../lib/types";
 import { Badge, Button, cx, Note } from "./ui";
@@ -18,6 +19,7 @@ export function ActionPanel({ incident, onChange }: { incident: IncidentDetail; 
     [...actions].reverse().find((a) => a.executed_at || a.state === "simulated");
   const recommended = incident.diagnosis?.recommended_action;
   const escalated = incident.status === "escalated";
+  const { can } = useSession();
 
   return (
     <div className="flex flex-col gap-4">
@@ -45,7 +47,10 @@ export function ActionPanel({ incident, onChange }: { incident: IncidentDetail; 
         )
       )}
 
-      {!incident.resolved_at && !actions.some((a) => ["approved", "executing", "verifying", "reverting"].includes(a.state)) && (
+      {!incident.resolved_at && !can("operator") && (
+        <div className="text-xs text-muted">Read-only: acting on incidents needs the operator role.</div>
+      )}
+      {!incident.resolved_at && can("operator") && !actions.some((a) => ["approved", "executing", "verifying", "reverting"].includes(a.state)) && (
         <ManualAction incident={incident} onChange={onChange} defaultOpen={escalated && !current} />
       )}
 
@@ -77,6 +82,7 @@ function CurrentAction({ incident, action, onChange }: { incident: IncidentDetai
   const [problems, setProblems] = useState<Problem[] | null>(null);
   const [healthySince, setHealthySince] = useState<number | null>(null);
   const state = actionStateOf(action.state);
+  const { can } = useSession();
 
   useStream((m) => {
     if (m.type === "verification" && m.incident_id === incident.id && m.action_id === action.id) {
@@ -137,12 +143,14 @@ function CurrentAction({ incident, action, onChange }: { incident: IncidentDetai
               {VERIFY_HEALTHY_S} s means recovered; still broken after {VERIFY_TIMEOUT_S / 60} min and it reverts the
               change and investigates again.
             </p>
-            {action.state === "awaiting_approval" ? (
+            {action.state === "awaiting_approval" && !can("operator") ? (
+              <div className="mt-3 text-[13px] text-muted">Waiting for an operator to approve or reject it.</div>
+            ) : action.state === "awaiting_approval" ? (
               <div className="mt-3 flex gap-2">
-                <Button variant="go" size="lg" disabled={busy} onClick={() => call("approve", { actor: "on-call" })}>
+                <Button variant="go" size="lg" disabled={busy} onClick={() => call("approve", {})}>
                   Approve and run
                 </Button>
-                <Button variant="danger" size="lg" disabled={busy} onClick={() => call("reject", { actor: "on-call" })}>
+                <Button variant="danger" size="lg" disabled={busy} onClick={() => call("reject", {})}>
                   Reject
                 </Button>
               </div>
@@ -250,7 +258,7 @@ function ManualAction({ incident, onChange, defaultOpen }: { incident: IncidentD
     setBusy(true);
     setError(null);
     try {
-      await post(`${API}/incidents/${incident.id}/actions`, { type, params, actor: "on-call" });
+      await post(`${API}/incidents/${incident.id}/actions`, { type, params });
       onChange();
       setOpen(false);
     } catch (e) {
