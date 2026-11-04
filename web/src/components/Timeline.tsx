@@ -18,6 +18,7 @@ const STYLE: Record<string, { label: string; tone: Tone }> = {
   diagnosis: { label: "Conclusion", tone: "ok" },
   action: { label: "Action", tone: "brass" },
   investigation_failed: { label: "Failed", tone: "bad" },
+  fix: { label: "Muse Code", tone: "info" },
   signal: { label: "Signal", tone: "bad" },
   signal_cleared: { label: "Cleared", tone: "ok" },
 };

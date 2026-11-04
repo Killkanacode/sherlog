@@ -120,6 +120,22 @@ export type IncidentSummary = {
   seen_before?: MemoryMatch | null;
   has_postmortem?: boolean;
   llm_usage?: Usage | null;
+  fix?: { state: string; pr?: PullRequest | null } | null;
+};
+
+export type PullRequest = { url: string; number: number; branch: string; base: string; commit: string };
+
+// The fixer's job: Muse Code writes a fix and a test, the fixer verifies both and opens a PR.
+export type FixJob = {
+  state: string; // starting | queued | running | writing | testing | opening_pr | done | failed
+  job_id?: string;
+  deploy?: string;
+  pr?: PullRequest | null;
+  verified?: { passes_on_fix: boolean; fails_on_deployed: boolean };
+  files?: string[];
+  tests?: string[];
+  error?: string;
+  seconds?: number;
 };
 
 export type TimelineEntry = { ts: string; kind: string; text: string; data: Record<string, any> };
@@ -233,6 +249,7 @@ export type IncidentDetail = IncidentSummary & {
   actions: Action[];
   past_incidents: MemoryMatch[];
   postmortem: string | null;
+  fix_job?: FixJob | null;
   llm_calls: LlmCall[];
 };
 

@@ -12,7 +12,8 @@ import { categoryOf, SERVICES, statusOf } from "../lib/labels";
 import { href } from "../lib/router";
 import { useSession } from "../lib/session";
 import { useStream } from "../lib/stream";
-import type { IncidentDetail, Topology } from "../lib/types";
+import type { Tone } from "../lib/labels";
+import type { FixJob, IncidentDetail, Topology } from "../lib/types";
 
 export function IncidentPage({ id }: { id: number }) {
   const now = useNow();
@@ -110,6 +111,11 @@ export function IncidentPage({ id }: { id: number }) {
           <Panel title="Mitigation">
             <ActionPanel incident={d} onChange={incident.refresh} />
           </Panel>
+          {d.fix_job && (
+            <Panel title="Code fix" aside="Muse Code">
+              <CodeFix job={d.fix_job} />
+            </Panel>
+          )}
           <ImpactPanel incident={d} />
           <Panel title="Evidence pack" aside="what the investigator read" bodyClass="">
             <EvidencePanel incident={d} />
@@ -130,6 +136,53 @@ export function IncidentPage({ id }: { id: number }) {
           <Usage incident={d} />
         </div>
       </div>
+    </div>
+  );
+}
+
+const FIX_STATE: Record<string, { label: string; tone: Tone }> = {
+  starting: { label: "Starting", tone: "muted" },
+  queued: { label: "Queued", tone: "muted" },
+  running: { label: "Preparing", tone: "info" },
+  writing: { label: "Writing the fix", tone: "info" },
+  testing: { label: "Verifying", tone: "info" },
+  opening_pr: { label: "Opening PR", tone: "info" },
+  done: { label: "PR opened", tone: "ok" },
+  failed: { label: "Not proposed", tone: "bad" },
+};
+
+// The lasting fix, beside the mitigation: what Muse Code changed and how the fixer checked it.
+function CodeFix({ job }: { job: FixJob }) {
+  const state = FIX_STATE[job.state] ?? { label: job.state, tone: "muted" as Tone };
+  const busy = !["done", "failed"].includes(job.state);
+  return (
+    <div className="flex flex-col gap-3 text-[13px]">
+      <div className="flex flex-wrap items-center gap-3">
+        <Badge tone={state.tone} live={busy}>
+          {state.label}
+        </Badge>
+        {job.deploy && <span className="text-ink-2">for deploy <Chip>{job.deploy}</Chip></span>}
+        {job.seconds != null && <span className="text-faint">{duration(job.seconds)}</span>}
+        {job.pr && (
+          <a href={job.pr.url} target="_blank" rel="noreferrer" className="ml-auto font-medium text-brass hover:underline">
+            Pull request #{job.pr.number} →
+          </a>
+        )}
+      </div>
+      {job.verified && (
+        <ul className="flex flex-col gap-1 text-ink-2">
+          <li>✓ The new test fails on the deployed code: it reproduces the bug</li>
+          <li>✓ It passes with the fix (run by the fixer in a sandbox, not by Muse Code)</li>
+        </ul>
+      )}
+      {(job.files?.length || job.tests?.length) && (
+        <div className="flex flex-wrap items-center gap-1.5 text-ink-2">
+          {job.files?.map((f) => <Chip key={f}>{f}</Chip>)}
+          {job.tests?.map((f) => <Chip key={f} className="text-ok">{f}</Chip>)}
+        </div>
+      )}
+      {job.state === "done" && !job.pr && <Note>Dry run: the fix was written and verified, but no pull request was opened.</Note>}
+      {job.error && <Note tone="bad">{job.error}</Note>}
     </div>
   );
 }
