@@ -5,11 +5,16 @@ cause, outcome and the action that restored service are stored. A new
 incident whose evidence shares a fingerprint or a template is flagged "seen
 before", and the investigator can search memory with search_past_incidents.
 A diagnosis with zero confidence (fake models, or a fallback) is not stored
-as knowledge.
+as knowledge. Only distinctive keys count: one seen in many past incidents
+says nothing about this one.
 """
 
 from sherlog import db
 from sherlog.detectors.logs import log_detector
+
+# A key found in more than this share of remembered incidents is background
+# noise (a flaky dependency's timeout, say), not evidence of the same problem.
+COMMON_SHARE = 0.2
 
 
 def keys(evidence: dict) -> tuple[list[str], list[str]]:
@@ -56,8 +61,15 @@ async def recall(incident_id: int, evidence: dict) -> list[dict]:
     fingerprints, templates = keys(evidence)
     if not (fingerprints or templates):
         return []
+    total, fp_counts, tpl_counts = await db.key_frequencies(fingerprints, templates)
+    limit = max(1, COMMON_SHARE * total)
+    fingerprints = [k for k in fingerprints if fp_counts.get(k, 0) <= limit]
+    templates = [k for k in templates if tpl_counts.get(k, 0) <= limit]
+    if not (fingerprints or templates):
+        return []
     rows = await db.recall(incident_id, fingerprints, templates, limit=3)
-    return [_public(row) for row in rows]
+    # A match needs a shared fingerprint, or at least two shared log templates.
+    return [_public(row) for row in rows if row["shared_fingerprints"] >= 1 or row["shared_templates"] >= 2]
 
 
 async def search(
