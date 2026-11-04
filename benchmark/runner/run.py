@@ -7,7 +7,10 @@ benchmark/results/. Runs against fake models (SHERLOG_FAKE_LLM) are labelled
 as such: they test the plumbing, not the diagnosis.
 
 Talks to the chaos controller (for ground truth and injection) and to
-Sherlog's public API, like the UI does. Standard library only:
+Sherlog's public API, like the UI does, with an operator token: SHERLOG_TOKEN,
+or SHERLOG_ADMIN_TOKEN from .env. The benchmark scores the diagnosis, not the
+fix: an action Sherlog proposes is recorded and turned down, and the chaos
+reset repairs the fault. Standard library only:
 
     python3 benchmark/runner/run.py                     # all scenarios + baseline
     python3 benchmark/runner/run.py 03 05               # scenarios by id prefix
@@ -16,7 +19,9 @@ Sherlog's public API, like the UI does. Standard library only:
 
 import argparse
 import json
+import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -25,6 +30,7 @@ from pathlib import Path
 CHAOS = "http://localhost:8100"
 SHERLOG = "http://localhost:8200"
 RESULTS = Path(__file__).resolve().parent.parent / "results"
+ENV = Path(__file__).resolve().parents[2] / ".env"
 
 QUIET_S = 30  # healthy and incident-free for this long before injecting
 QUIET_TIMEOUT_S = 420
@@ -33,9 +39,24 @@ SHERLOG_INVESTIGATES = True  # read from Sherlog's /health at start
 DIAGNOSIS_TIMEOUT_S = 300  # after detection
 
 
+def token() -> str:
+    if os.environ.get("SHERLOG_TOKEN"):
+        return os.environ["SHERLOG_TOKEN"]
+    for line in ENV.read_text().splitlines() if ENV.exists() else []:
+        if line.startswith("SHERLOG_ADMIN_TOKEN="):
+            return line.split("=", 1)[1].strip()
+    return ""
+
+
+TOKEN = token()
+
+
 def call(method: str, url: str, body: dict | None = None, timeout: float = 300):
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method, headers={"content-type": "application/json"})
+    headers = {"content-type": "application/json"}
+    if TOKEN and url.startswith(SHERLOG):
+        headers["authorization"] = f"Bearer {TOKEN}"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read() or b"null")
 
@@ -66,7 +87,9 @@ def wait_quiet() -> bool:
         if call("GET", f"{SHERLOG}/health").get("learning"):
             time.sleep(5)
             continue
-        open_incidents = call("GET", f"{SHERLOG}/incidents?status=open")
+        # An escalated incident is not "open" but still collects signals until
+        # it is over, so wait for every incident to be resolved.
+        open_incidents = [i for i in call("GET", f"{SHERLOG}/incidents") if not i["resolved_at"]]
         signals = [s for s in call("GET", f"{SHERLOG}/signals") if s["details"].get("impact", True)]
         if not open_incidents and not signals:
             quiet_since = quiet_since or time.monotonic()
@@ -137,11 +160,14 @@ def run_scenario(scenario: dict) -> dict:
         }
     )
     result.update(score_diagnosis(detail, truth, accepted, detected_at))
+    result.update(turn_down_action(first["id"], detail, truth))
     log(
         f"{sid}: incident #{first['id']} after {result['ttd_s']}s, {len(incidents)} incident(s), "
         f"services {detail['services']}, hint {hint} ({'ok' if result['hint_correct'] else 'wrong'})"
         + (f", diagnosis {result['diagnosis_service']}/{result['diagnosis_category']} "
            f"({'ok' if result['cause_correct'] else 'wrong'})" if result.get("diagnosed") else "")
+        + (f", proposed {result['proposed_action']} ({'ok' if result['action_acceptable'] else 'wrong'})"
+           if result.get("proposed_action") else "")
     )
     call("POST", f"{CHAOS}/reset")
     return result
@@ -194,6 +220,23 @@ def score_diagnosis(detail: dict, truth: dict, accepted: set, detected_at: datet
     }
 
 
+def turn_down_action(incident_id: int, detail: dict, truth: dict) -> dict:
+    """Record the action Sherlog wants to run and reject it so the incident
+    can close; the chaos reset is what repairs the system."""
+    pending = next((a for a in detail.get("actions", []) if a["state"] == "awaiting_approval"), None)
+    if not pending:
+        return {}
+    try:
+        call("POST", f"{SHERLOG}/incidents/{incident_id}/reject", {"reason": "benchmark run: chaos reset repairs it"})
+    except urllib.error.HTTPError as exc:
+        log(f"incident #{incident_id}: could not reject the pending action ({exc.code})")
+    return {
+        "proposed_action": pending["type"],
+        "proposed_target": pending["params"].get("service"),
+        "action_acceptable": pending["type"] in truth.get("acceptable_actions", []),
+    }
+
+
 def run_baseline(minutes: float) -> dict:
     call("POST", f"{CHAOS}/reset")
     wait_quiet()
@@ -234,8 +277,8 @@ def main() -> None:
     args = parser.parse_args()
 
     global SHERLOG_INVESTIGATES
-    health = call("GET", f"{SHERLOG}/health")
-    llm_mode, SHERLOG_INVESTIGATES = health.get("llm"), health.get("investigate", False)
+    status = call("GET", f"{SHERLOG}/status")
+    llm_mode, SHERLOG_INVESTIGATES = status.get("llm"), status.get("investigate", False)
     if llm_mode == "fake":
         log("Sherlog is running FAKE models: diagnoses below test the plumbing, not the reasoning")
 
