@@ -1,0 +1,159 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-bg: #0b0c0e;
+  --color-panel: #121316;
+  --color-raised: #181a1e;
+  --color-hover: #1f2126;
+  --color-line: #25272c;
+  --color-line-strong: #34373e;
+  --color-ink: #ebe9e4;
+  --color-ink-2: #bdbcb6;
+  --color-muted: #8a8c94;
+  --color-faint: #5c5f68;
+
+  --color-brass: #d4a84b;
+  --color-ok: #4fb87e;
+  --color-warn: #e0a43a;
+  --color-bad: #ee5b4d;
+  --color-info: #74a7f2;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  scrollbar-color: var(--color-line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-brass) 35%, transparent);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A live indicator: the only animation in the console. */
+@keyframes blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+.blink {
+  animation: blink 1.4s steps(2, start) infinite;
+}
+
+/* React Flow, flattened to the console's look. */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-edge-label-background-color: var(--color-panel);
+  --xy-edge-label-color: var(--color-muted);
+}
+.react-flow__edge-textbg {
+  fill: var(--color-panel);
+}
+.react-flow__edge-text {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+.react-flow__node {
+  cursor: default;
+}
+
+/* Postmortem Markdown. */
+.doc {
+  color: var(--color-ink-2);
+  font-size: 14px;
+  line-height: 1.65;
+}
+.doc h1 {
+  color: var(--color-ink);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0 0 20px;
+}
+.doc h2 {
+  color: var(--color-ink);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 32px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-line);
+}
+.doc p {
+  margin: 0 0 12px;
+}
+.doc strong {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.doc code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--color-ink);
+  background: var(--color-raised);
+  border: 1px solid var(--color-line);
+  padding: 1px 5px;
+}
+.doc ul {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  list-style: square;
+}
+.doc li {
+  margin: 4px 0;
+}
+.doc li:has(> input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -20px;
+}
+.doc input[type="checkbox"] {
+  margin-right: 8px;
+  accent-color: var(--color-brass);
+}
+.doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 16px;
+  font-size: 13px;
+}
+.doc th,
+.doc td {
+  border-bottom: 1px solid var(--color-line);
+  padding: 7px 12px 7px 0;
+  text-align: left;
+  vertical-align: top;
+}
+.doc td:first-child {
+  color: var(--color-muted);
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.doc thead th:empty {
+  display: none;
+}
