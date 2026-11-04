@@ -233,6 +233,17 @@ services:
       timeout: 3s
       retries: 10
 
+  # The console. It also drives the Chaos Lab, so it joins the chaos network;
+  # the agent above still has no route there.
+  web:
+    build: ./web
+    image: sherlog/web:dev
+    restart: unless-stopped
+    mem_limit: 64m
+    networks: [sherlog, obs, platform, chaos]
+    ports: ["127.0.0.1:${WEB_HOST_PORT:-8300}:80"]
+    depends_on: [sherlog-api, chaos-controller, prometheus, platform-api]
+
   # ------------------------------------------------------- platform & chaos
   # Simulated CD platform. Adopts the compose-run demo containers and replaces
   # them on deploy / rollback / config changes. Reads git history (read-only)
