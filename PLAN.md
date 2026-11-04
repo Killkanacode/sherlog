@@ -36,7 +36,7 @@ Lee este archivo completo antes de escribir código. Reglas de trabajo:
 |---|---|---|
 | **Muse Spark** | Meta Model API | Agente investigador principal: razonamiento + tool calling + salida JSON estructurada |
 | **Muse Spark Open** | Modal o Baseten (`meta-models/muse-spark-open-1026` en Baseten) | Triaje de alto volumen: resume plantillas de logs y excepciones anómalas. Argumento: "los logs sensibles se procesan en tu propia infraestructura" |
-| **Muse Code** | `TODO(VERIFY)` (ver "Muse code recipes" en la doc) | Genera el parche + test para bugs de código y abre un PR |
+| **Muse Code** | CLI `muse exec` (headless) con `META_API_KEY`, modelo `muse-spark-1.3` | Genera el parche + test para bugs de código; el fixer lo verifica y abre un PR |
 | **Muse Voice Transcribe** | Meta Model API | El ingeniero habla con Sherlog por voz (preguntas y aprobaciones) |
 
 Verificado el 4 nov contra la doc oficial (dev.meta.ai/docs) y con llamadas reales:
@@ -49,7 +49,7 @@ Verificado el 4 nov contra la doc oficial (dev.meta.ai/docs) y con llamadas real
 
 `TODO(VERIFY)` pendiente:
 - [x] Muse Spark Open en Baseten: `https://inference.baseten.co/v1`, ID `meta-models/muse-spark-open`, mismo precio que Muse Spark. Acepta `reasoning_effort` pero **no** respeta `json_schema`: el triaje pone el schema en el prompt y reintenta una vez.
-- Cómo se invoca Muse Code (API, CLI o SDK).
+- [x] Muse Code (dev.meta.ai/docs/muse-code, CLI 1.4.14): se instala con `curl -fsSL https://dev.meta.ai/install.sh | bash` y corre sin interfaz con `muse exec`. Usamos `--api-key-stdin`, `--model`, `--reasoning-effort`, `--workspace`, `--max-model-steps`, `--output-schema` y `--json` (eventos JSONL: la respuesta final llega en `run.terminal.completed` y el uso en `run.usage`). Su sandbox (bubblewrap) necesita user namespaces dentro de Docker: seccomp, apparmor y systempaths relajados solo en el contenedor del fixer; `--sandbox-network restricted` deja sin red los comandos del agente. Cobra por tokens como la Model API; casi todo el input sale de caché ($0.15/M).
 - Endpoint y formato de audio de Muse Voice Transcribe.
 
 **Diseño obligatorio:** un único módulo `agent/sherlog/llm/` con un cliente por modelo detrás de una interfaz común, configurado por variables de entorno. Si la doc cambia, solo se toca ese módulo. Cada llamada registra modelo, tokens de entrada y salida, latencia y costo estimado.
@@ -291,13 +291,13 @@ Cada paso (hipótesis, herramienta usada, resultado resumido) se emite por SSE p
 - Modo `dry_run` global para pruebas.
 
 #### 5.4.9 Fixer (Muse Code)
-Se activa cuando la categoría es `bad_deploy_code_bug`:
-1. Crea una rama desde la versión rota.
-2. Muse Code genera el parche y un test que reproduce el bug.
-3. Corre los tests en un contenedor aislado.
-4. Si pasan, abre un PR en el repo de la demo app (GitHub API) con la causa, la evidencia y el enlace al incidente.
+Se activa cuando la categoría es `bad_deploy_code_bug` y hay un deploy al que culpar. Corre en paralelo a la mitigación, en su propio contenedor (`fixer/`):
+1. Sherlog le manda el diff del deploy, las excepciones del servicio y el código tal como se desplegó (`GET /archive` de la plataforma: solo `demo-app/`, sin historial ni ramas, así que no puede ver el benchmark).
+2. Muse Code (`muse exec`) escribe el arreglo y un test, como usuario `agent`, con su sandbox y sin red para sus comandos. Nunca ve el token de GitHub.
+3. El fixer verifica por su cuenta, en un sandbox sin red: el test falla con el código desplegado y pasa con el arreglo; solo toca el servicio, `common/` o `tests/`.
+4. Abre el PR en el repo propio de la tienda (`DEMO_APP_REPO`) por la API de GitHub: sube el código desplegado como rama `sherlog/deployed-<versión>` y el arreglo encima, así el PR muestra solo el arreglo.
 
-La mitigación inmediata sigue siendo el rollback; el PR es la corrección definitiva. `TODO(VERIFY)`: mecanismo de invocación de Muse Code.
+La mitigación inmediata sigue siendo el rollback; el PR es la corrección definitiva, para revisión humana. `FIXER_DRY_RUN=true` hace todo menos el PR.
 
 #### 5.4.10 Memoria de incidentes
 Tabla de incidentes resueltos con huellas de excepciones, plantillas clave, servicio, categoría, acción que funcionó y tiempo de resolución. `search_past_incidents` busca por coincidencia de huella o plantillas. En la UI se muestra como "Seen before: incident #12, fixed by rollback".
