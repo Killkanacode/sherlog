@@ -24,7 +24,10 @@ EVIDENCE = {
     "suspect_services": ["gateway", "orders"],
     "root_cause_hint": {"service": "orders", "reason": "deepest anomalous service", "ranking": []},
     "signals": [],
-    "changes": [],
+    "changes": [
+        {"id": "evt_1", "type": "deploy", "service": "orders", "actor": "dev", "from_version": "main",
+         "to_version": "b0e8922", "commit_message": "orders: simplify order total helper"},
+    ],
     "log_templates": [
         {"template": "checkout failed: <*>", "level": "ERROR", "service": "orders"},
         {"template": "GET /products <*>", "level": "INFO", "service": "inventory"},
@@ -86,10 +89,18 @@ def isolated(monkeypatch):
     async def impact(start, end):
         return {"requests": 1000, "failed": 120}
 
+    async def frequencies(fingerprints, templates):
+        return 0, {}, {}
+
+    async def usage():
+        return {"tokens": 0, "cost_usd": 0.0}
+
     for name in ("update_incident", "put_setting", "insert_llm_call"):
         monkeypatch.setattr(db, name, nothing)
     monkeypatch.setattr(db, "remember", remember)
     monkeypatch.setattr(db, "recall", recall)
+    monkeypatch.setattr(db, "key_frequencies", frequencies)
+    monkeypatch.setattr(db, "month_usage", usage)
     monkeypatch.setattr(postmortem, "gateway_impact", impact)
     yield record
     policy.autonomy, policy.dry_run = saved.autonomy, saved.dry_run
@@ -188,11 +199,13 @@ def test_rollback_records_how_to_undo_it(monkeypatch):
         ("GET", "/services/orders/history"): (200, [{"version": "aaa1111", "commit_sha": "aaa1111" * 4},
                                                     {"version": "bbb2222", "commit_sha": "bbb2222" * 4}]),
         ("POST", "/rollback"): (200, {"service": "orders", "version": "aaa1111"}),
+        ("GET", "/services"): (200, [{"service": "orders", "version": "aaa1111", "replicas": 1}]),
     })
     result, undo = run(actions.execute("rollback", {"service": "orders"}))
-    assert seen[-1] == ("POST", "/rollback", {"actor": "sherlog", "service": "orders"})
+    assert ("POST", "/rollback", {"actor": "sherlog", "service": "orders"}) in seen
     assert result["version"] == "aaa1111"
     assert (undo["method"], undo["path"], undo["body"]) == ("POST", "/deploy", {"service": "orders", "ref": "bbb2222" * 4})
+    assert undo["expect"] == {"service": "orders", "version": "aaa1111"}  # only undone if still what Sherlog left
 
 
 def test_config_revert_undo_skips_masked_values(monkeypatch):
