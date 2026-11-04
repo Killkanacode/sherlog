@@ -14,14 +14,23 @@ class Usage:
     calls: list[dict] = field(default_factory=list)
 
     async def record(self, role: str, model: ChatModel, completion: Completion) -> dict:
+        return await self.add(
+            role, completion.model or model.model, completion.input_tokens, completion.output_tokens,
+            completion.latency_ms, cost_usd(model, completion),
+        )
+
+    async def add(
+        self, role: str, model: str, input_tokens: int, output_tokens: int, latency_ms: float, cost: float | None
+    ) -> dict:
+        """Record model usage reported in bulk (the fixer's Muse Code run)."""
         call = {
             "ts": utcnow().isoformat(),
             "role": role,
-            "model": completion.model or model.model,
-            "input_tokens": completion.input_tokens,
-            "output_tokens": completion.output_tokens,
-            "latency_ms": completion.latency_ms,
-            "cost_usd": cost_usd(model, completion),
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "latency_ms": latency_ms,
+            "cost_usd": cost,
         }
         self.calls.append(call)
         await db.insert_llm_call(self.incident_id, call)

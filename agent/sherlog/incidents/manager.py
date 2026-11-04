@@ -21,7 +21,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from sherlog import db, llm
+from sherlog import db, fixer, llm
 from sherlog.actions import execute as actions
 from sherlog.actions import verify
 from sherlog.actions.policy import policy, throttle, vet
@@ -30,8 +30,11 @@ from sherlog.config import settings
 from sherlog.detectors.logs import log_detector
 from sherlog.funnel.builder import build_evidence
 from sherlog.funnel.heuristics import is_impact
+from sherlog.ingest.clients import platform
 from sherlog.investigator import agent as investigator
 from sherlog.investigator.triage import run_triage
+from sherlog.llm.base import Completion
+from sherlog.llm.guard import budget
 from sherlog.llm.redact import looks_like_injection, scan_evidence
 from sherlog.llm.usage import Usage
 from sherlog.memory import store as memory
@@ -77,6 +80,7 @@ class Incident:
     seen_before: list[dict] = field(default_factory=list)
     postmortem: str | None = None
     untrusted: str | None = None  # instruction-like text found in its telemetry
+    fix: dict | None = None  # the fixer's job: {"state", "job_id", "pr", "verified", ...}
 
     def __post_init__(self) -> None:
         self.usage = self.usage or Usage(self.id)
@@ -132,6 +136,7 @@ class Incident:
             "seen_before": self.seen_before[0] if self.seen_before else None,
             "has_postmortem": self.postmortem is not None,
             "llm_usage": self.usage.totals() if self.usage.calls else None,
+            "fix": {"state": self.fix["state"], "pr": self.fix.get("pr")} if self.fix else None,
         }
 
     def data(self) -> dict:
@@ -145,6 +150,7 @@ class Incident:
             "past_incidents": self.seen_before,  # every memory match; summary's seen_before is the best one
             "postmortem": self.postmortem,
             "untrusted_content": self.untrusted,
+            "fix_job": self.fix,
             "llm_calls": self.usage.calls,
         }
 
@@ -392,7 +398,78 @@ class IncidentManager:
             f"{totals['total_tokens']:,} tokens, {cost}",
             incident.diagnosis,
         )
+        if fixer.enabled() and fixer.blamed_deploy(incident.evidence, incident.diagnosis) and not incident.fix:
+            incident.fix = {"state": "starting"}
+            self.spawn(self.write_fix(incident))
         await self.respond(incident)
+
+    async def write_fix(self, incident: Incident) -> None:
+        """Have Muse Code write a fix PR for the deploy that broke the service.
+        Runs beside the mitigation; its outcome lands in the timeline."""
+
+        async def note(kind: str, text: str) -> None:
+            incident.add_timeline(kind, text, {"fix": incident.fix})
+            broadcaster.publish("investigation", {"incident_id": incident.id, "kind": kind, "text": text, "data": {}})
+            await self.save(incident)
+
+        deploy = fixer.blamed_deploy(incident.evidence, incident.diagnosis)
+        cause = incident.diagnosis["root_cause"]
+        try:
+            await budget.check()
+            diff = await platform.diff(deploy["service"], deploy["from_version"], deploy["to_version"])
+            source = await platform.archive(deploy["service"], deploy["to_version"])
+            job = await fixer.client.submit(
+                incident.id, deploy, diff, source, cause, fixer.evidence_text(incident.evidence, deploy["service"])
+            )
+        except Exception as exc:  # noqa: BLE001 - the fix is a bonus; the incident goes on without it
+            log.warning("Fixer not started for incident #%d: %s", incident.id, exc)
+            incident.fix = {"state": "failed", "error": str(exc)[:300]}
+            return await note("fix", f"Code fix not attempted: {exc}")
+        incident.fix = {"state": job["state"], "job_id": job["id"], "deploy": deploy["to_version"]}
+        await note("fix", f"Muse Code is writing a fix for {deploy['service']} {deploy['to_version']} "
+                          f"(\"{deploy.get('commit_message', '')}\") and a test that reproduces the bug")
+        seen, deadline = 0, asyncio.get_running_loop().time() + settings.fixer_wait_s
+        while True:
+            await asyncio.sleep(5)
+            try:
+                job = await fixer.client.job(job["id"])
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Fixer job %s unreadable: %s", incident.fix["job_id"], exc)
+                job = {**job, "state": job.get("state", "running")}
+            incident.fix.update({k: job[k] for k in ("state", "pr", "verified", "files", "tests", "error", "seconds") if k in job})
+            for entry in job.get("steps", [])[seen:]:
+                if not entry["text"].startswith("Pull request opened"):
+                    await note("fix", entry["text"])
+            seen = len(job.get("steps", []))
+            if job["state"] in fixer.FINAL_STATES:
+                break
+            if asyncio.get_running_loop().time() > deadline:
+                incident.fix.update(state="failed", error=f"no result after {settings.fixer_wait_s} s")
+                break
+        usage = job.get("usage")
+        if usage and usage.get("calls"):
+            uncached = usage["input_tokens"] - usage["cached_tokens"]
+            cached_price = settings.price_investigator_cached if settings.price_investigator_cached is not None else settings.price_investigator_in
+            prices = (settings.price_investigator_in, cached_price, settings.price_investigator_out)
+            cost = None if None in prices else (
+                uncached * prices[0] + usage["cached_tokens"] * prices[1] + usage["output_tokens"] * prices[2]
+            ) / 1_000_000
+            await incident.usage.add(
+                "fixer", usage.get("model", "muse-code"), usage["input_tokens"], usage["output_tokens"],
+                (job.get("seconds") or 0) * 1000, round(cost, 6) if cost is not None else None,
+            )
+            budget.spent(Completion(usage.get("model", ""), None, input_tokens=usage["input_tokens"],
+                                    output_tokens=usage["output_tokens"]), cost)
+        if incident.fix["state"] == "done" and not incident.fix.get("pr"):
+            await note("fix", "Fix written and verified (fixer dry run: no pull request opened)")
+        elif incident.fix["state"] == "done":
+            pr = incident.fix["pr"]
+            await note("fix", f"Fix PR opened: {pr['url']} (test fails on {deploy['to_version']}, passes with the fix)")
+            if incident.postmortem and "## Code fix" not in incident.postmortem:
+                incident.postmortem += f"\n\n## Code fix\n\nMuse Code opened {pr['url']}; its test reproduces the bug.\n"
+                await self.save(incident)
+        else:
+            await note("fix", f"Code fix not proposed: {incident.fix.get('error', 'unknown error')}")
 
     @staticmethod
     def _attempts(incident: Incident) -> list[str]:
@@ -423,7 +500,9 @@ class IncidentManager:
                 f"confidence {cause['confidence']:.2f})",
             )
         if type_ == "open_fix_pr":
-            return await self.escalate(incident, "the investigator wants a code fix and the fixer isn't available yet")
+            if incident.fix:
+                return await self.escalate(incident, "no mitigation exists; Muse Code is writing a fix PR for review")
+            return await self.escalate(incident, "the investigator wants a code fix but there's no deploy to fix or no fixer")
         refused = actions.check(type_, params)
         if refused:
             return await self.escalate(incident, f"the recommended action can't run: {refused}")

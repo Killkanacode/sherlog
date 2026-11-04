@@ -60,6 +60,7 @@ class Settings:
     # USD per million tokens; unset means "unknown" and cost is reported as null.
     price_investigator_in: float | None = _price("MODEL_INVESTIGATOR_PRICE_IN")
     price_investigator_out: float | None = _price("MODEL_INVESTIGATOR_PRICE_OUT")
+    price_investigator_cached: float | None = _price("MODEL_INVESTIGATOR_PRICE_CACHED")  # cached input
     price_open_in: float | None = _price("OPEN_MODEL_PRICE_IN")
     price_open_out: float | None = _price("OPEN_MODEL_PRICE_OUT")
 
@@ -77,6 +78,10 @@ class Settings:
     max_steps: int = _int("SHERLOG_MAX_STEPS", 12)
     token_budget: int = _int("SHERLOG_TOKEN_BUDGET_PER_INCIDENT", 100000)
     tool_timeout_s: float = _float("SHERLOG_TOOL_TIMEOUT_S", 20.0)
+
+    # Fixer: Muse Code writes a fix PR for code bugs (empty = off); a job's longest wait.
+    fixer_url: str = os.environ.get("FIXER_URL", "")
+    fixer_wait_s: int = _int("SHERLOG_FIXER_WAIT_S", 1200)
 
     # Actions. Autonomy and dry run are only the defaults: PUT /settings changes
     # them at runtime and the choice is kept in Sherlog's database.

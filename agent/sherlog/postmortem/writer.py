@@ -16,7 +16,7 @@ from sherlog.signals import describe as describe_signal
 
 log = logging.getLogger("sherlog.postmortem")
 
-TIMELINE_KINDS = ("status", "evidence", "seen_before", "triage", "diagnosis", "action", "investigation_failed")
+TIMELINE_KINDS = ("status", "evidence", "seen_before", "triage", "diagnosis", "action", "investigation_failed", "fix")
 FOLLOW_UPS = {
     "bad_deploy_code_bug": [
         "Fix the bug with a regression test before redeploying the change",
@@ -136,6 +136,10 @@ def write(incident, impact_start: datetime, recovered_at: datetime, impact: dict
             out.append(f"| {_clock(datetime.fromisoformat(entry['ts']))} | {text[:300]} |")
     if tools:
         out += ["", f"The investigator made {tools} tool calls; the full trail is in the incident timeline."]
+
+    pr = (((incident.fix or {}).get("pr")) or {}).get("url")
+    if pr:
+        out += ["", "## Code fix", "", f"Muse Code opened {pr}; its test fails on the deployed version and passes with the fix."]
 
     follow_ups = list(FOLLOW_UPS.get(cause["category"], []) if known else [])
     if incident.seen_before:
