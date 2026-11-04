@@ -50,18 +50,27 @@ def triage_input(evidence: dict) -> dict:
 
 
 async def run_triage(model: ChatModel, evidence: dict, usage: Usage) -> dict | None:
+    schema = json_schema(Triage)
+    # Some partner endpoints accept response_format but don't enforce it
+    # (Baseten's Muse Spark Open, checked 2026-11-04), so the schema also goes
+    # in the prompt and a reply that doesn't validate gets one corrected retry.
     messages = [
-        {"role": "system", "content": SYSTEM},
+        {"role": "system", "content": SYSTEM + "\nThe JSON must match this schema exactly:\n" + json.dumps(schema)},
         {"role": "user", "content": "Evidence pack:\n```json\n" + json.dumps(triage_input(evidence), default=str) + "\n```"},
     ]
-    try:
-        completion = await model.complete(messages, schema=json_schema(Triage), max_tokens=1500)
-    except LLMError as exc:
-        log.warning("Triage failed: %s", exc)
-        return None
-    await usage.record("triage", model, completion)
-    try:
-        return parse(Triage, completion.content).model_dump()
-    except ValueError as exc:
-        log.warning("Triage reply was not valid: %s", exc)
-        return None
+    for attempt in range(2):
+        try:
+            completion = await model.complete(messages, schema=schema, max_tokens=4096)
+        except LLMError as exc:
+            log.warning("Triage failed: %s", exc)
+            return None
+        await usage.record("triage", model, completion)
+        try:
+            return parse(Triage, completion.content).model_dump()
+        except ValueError as exc:
+            log.warning("Triage reply was not valid (attempt %d): %s", attempt + 1, exc)
+            messages += [
+                {"role": "assistant", "content": completion.content or ""},
+                {"role": "user", "content": f"That reply does not match the schema ({exc}). Reply again with JSON only."},
+            ]
+    return None

@@ -183,7 +183,7 @@ def test_chat_api_wire_format():
             "usage": {"prompt_tokens": 120, "completion_tokens": 30},
         })
 
-    model = ChatCompletionsModel("https://api.test.invalid/v1", "k", "m-1", timeout_s=5)
+    model = ChatCompletionsModel("https://api.test.invalid/v1", "k", "m-1", timeout_s=5, reasoning_effort="low")
     model._http = httpx.AsyncClient(base_url="https://api.test.invalid/v1", transport=httpx.MockTransport(handler),
                                     headers={"Authorization": "Bearer k"})
     history = [
@@ -191,9 +191,37 @@ def test_chat_api_wire_format():
         {"role": "assistant", "content": None, "tool_calls": [{"id": "t0", "name": "get_exception", "arguments": {"fingerprint": "x"}}]},
         {"role": "tool", "tool_call_id": "t0", "content": "{}"},
     ]
-    completion = run(model.complete(history, tools=tools.specs()[:1]))
+    completion = run(model.complete(history, tools=tools.specs()[:1], max_tokens=8192))
     assert seen["path"] == "/v1/chat/completions" and seen["auth"] == "Bearer k"
     assert seen["body"]["messages"][1]["tool_calls"][0]["function"]["arguments"] == "{\"fingerprint\": \"x\"}"
     assert seen["body"]["tools"][0]["type"] == "function"
+    # max_tokens is deprecated on the Meta API; the cap covers reasoning too.
+    assert seen["body"]["max_completion_tokens"] == 8192 and "max_tokens" not in seen["body"]
+    assert seen["body"]["reasoning_effort"] == "low"
     assert completion.tool_calls[0].arguments == {"service": "orders"}
     assert (completion.input_tokens, completion.output_tokens) == (120, 30)
+
+    # Partner endpoints may not know reasoning_effort: only sent when set.
+    plain = ChatCompletionsModel("https://api.test.invalid/v1", "k", "m-1", timeout_s=5)
+    plain._http = model._http
+    run(plain.complete([{"role": "user", "content": "hi"}], schema={"type": "object"}))
+    assert "reasoning_effort" not in seen["body"]
+    assert seen["body"]["response_format"]["type"] == "json_schema"
+
+
+def test_triage_falls_back_to_muse_spark_without_an_open_model(monkeypatch):
+    import dataclasses
+
+    from sherlog import llm
+
+    patched = dataclasses.replace(
+        llm.settings, fake_llm=False, meta_api_key="k", open_model_base_url="", open_model_api_key="",
+    )
+    monkeypatch.setattr(llm, "settings", patched)
+    llm.triage_model.cache_clear()
+    try:
+        triage = llm.triage_model().inner
+        assert triage.model == patched.model_investigator and triage.reasoning_effort == "minimal"
+        assert "not set" in llm.describe()["triage"]
+    finally:
+        llm.triage_model.cache_clear()
