@@ -39,10 +39,16 @@ Lee este archivo completo antes de escribir código. Reglas de trabajo:
 | **Muse Code** | `TODO(VERIFY)` (ver "Muse code recipes" en la doc) | Genera el parche + test para bugs de código y abre un PR |
 | **Muse Voice Transcribe** | Meta Model API | El ingeniero habla con Sherlog por voz (preguntas y aprobaciones) |
 
-`TODO(VERIFY)` antes de la Fase 3:
-- Base URL de la Meta Model API, formato de autenticación y si es compatible con el SDK de OpenAI.
-- IDs exactos de cada modelo.
-- Soporte de tool calling y JSON schema en Muse Spark.
+Verificado el 4 nov contra la doc oficial (dev.meta.ai/docs) y con llamadas reales:
+- [x] Base URL `https://api.meta.ai/v1`, `Authorization: Bearer`, compatible con el SDK de OpenAI (`POST /chat/completions`).
+- [x] IDs: `muse-spark-1.3` (también 1.2 y 1.1). Las variantes `-contributor` son más baratas, pero Meta usa los prompts para entrenar, así que no las usamos.
+- [x] Tool calling (varias llamadas por turno) y `response_format` con `json_schema`.
+- [x] Muse Spark siempre razona: `max_completion_tokens` (`max_tokens` está deprecado) cuenta razonamiento + respuesta; `reasoning_effort` va de `minimal` a `max`.
+- [x] Precio (modo estándar): $1.25 entrada / $4.25 salida por millón de tokens; el razonamiento se cobra como salida.
+- [x] Muse Spark Open no está en la Meta Model API: corre en partners (Baseten, Modal, Fireworks, Groq, Together, OpenRouter...) o self-host. Mientras no haya endpoint, el triaje usa Muse Spark.
+
+`TODO(VERIFY)` pendiente:
+- [x] Muse Spark Open en Baseten: `https://inference.baseten.co/v1`, ID `meta-models/muse-spark-open`, mismo precio que Muse Spark. Acepta `reasoning_effort` pero **no** respeta `json_schema`: el triaje pone el schema en el prompt y reintenta una vez.
 - Cómo se invoca Muse Code (API, CLI o SDK).
 - Endpoint y formato de audio de Muse Voice Transcribe.
 

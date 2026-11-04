@@ -151,9 +151,14 @@ over `/stream` and kept in the incident timeline. Each model call is
 accounted for per incident, with tokens, latency and cost. Cost appears once
 prices are configured.
 
-All model-specific code lives in `agent/sherlog/llm/`. Wire-format details
-that haven't been checked against Meta's documentation are marked
-`TODO(VERIFY)`.
+All model-specific code lives in `agent/sherlog/llm/`. The client follows
+Meta's Model API docs (OpenAI-compatible Chat Completions at
+`https://api.meta.ai/v1`). Muse Spark always reasons before answering, so
+each turn's `max_completion_tokens` leaves room for reasoning plus the
+answer, and `MODEL_INVESTIGATOR_REASONING` sets how deep it thinks (`low` by
+default, to keep incidents fast). Triage runs on Muse Spark Open when a
+partner endpoint is configured, and on Muse Spark at minimal reasoning until
+then.
 
 ```bash
 export KEY=<your API key>; AUTH="Authorization: Bearer $KEY"
