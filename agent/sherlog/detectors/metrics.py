@@ -101,6 +101,18 @@ RULES = (
 )
 
 
+def robust_seed(baseline: Ewma, values: list[float]) -> None:
+    """Start a baseline from the median and MAD of its history rather than
+    its mean and variance, so an incident in the learning window (up to half
+    of it) doesn't become "normal" and hide the next one."""
+    ordered = sorted(values)
+    median = ordered[len(ordered) // 2]
+    mad = sorted(abs(v - median) for v in values)[len(values) // 2]
+    baseline.mean = median
+    baseline.var = (1.4826 * mad) ** 2
+    baseline.samples = len(values)
+
+
 @dataclass
 class SeriesState:
     baseline: Ewma = field(default_factory=lambda: Ewma(ALPHA))
@@ -140,11 +152,9 @@ class MetricDetector:
                 key = self._key(rule, series["metric"])
                 if key is None:
                     continue
-                state = self.series.setdefault(key, SeriesState())
-                for _, raw in series["values"]:
-                    value = float(raw)
-                    if math.isfinite(value):
-                        state.baseline.update(value)
+                values = [v for v in (float(raw) for _, raw in series["values"]) if math.isfinite(v)]
+                if values:
+                    robust_seed(self.series.setdefault(key, SeriesState()).baseline, values)
         log.info("Seeded %d metric series from %ds of history", len(self.series), settings.learning_s)
 
     def _evaluate(self, rule: Rule, state: SeriesState, value: float) -> tuple[bool, float, str]:

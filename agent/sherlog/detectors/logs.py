@@ -1,9 +1,17 @@
 """Log-based detection: Drain3 templates, exception fingerprints and silence.
 
-Logs are pulled from Loki in small forward pages (every few seconds), so the
-detector catches up after a restart. One Drain3 miner per service turns lines
-into templates. Per template and per exception fingerprint we keep 5-second
-buckets for the last minute plus a per-minute EWMA baseline.
+Sherlog never reads every log line. Every few seconds it asks Loki for two
+things: how many lines each service wrote (a count computed inside Loki),
+and the WARN/ERROR/FATAL lines themselves, filtered inside Loki too. In a
+healthy system that is a handful of lines out of tens of thousands, so the
+cost follows the error volume, not the total volume. If a poll still brings
+more than MAX_LINES_PER_POLL lines, the rest of the window is skipped and
+counted as dropped rather than letting the detector fall behind.
+
+One Drain3 miner per service turns WARN+ lines into templates. Per template
+and per exception fingerprint we keep 5-second buckets for the last minute
+plus a per-minute EWMA baseline. The whole state is snapshotted to Postgres
+every minute, so a restart resumes where it stopped instead of relearning.
 
 Signals:
   new_log_template   a WARN/ERROR template first seen after learning
@@ -21,13 +29,16 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
+import jsonpickle
 from drain3 import TemplateMiner
 from drain3.masking import MaskingInstruction
 from drain3.template_miner_config import TemplateMinerConfig
 
+from sherlog import db
 from sherlog.config import SERVICES, settings
 from sherlog.detectors.baseline import Ewma
 from sherlog.ingest.clients import loki
+from sherlog.llm.redact import looks_like_injection
 from sherlog.signals import bus, utcnow
 
 log = logging.getLogger("sherlog.detectors.logs")
@@ -36,7 +47,15 @@ BUCKET_S = 5
 BUCKETS_PER_MIN = 60 // BUCKET_S
 LEVELS = {"DEBUG": 0, "INFO": 1, "WARN": 2, "WARNING": 2, "ERROR": 3, "FATAL": 4, "CRITICAL": 4}
 QUERY = '{service_name=~"' + "|".join(SERVICES) + '"}'
+WARN_QUERY = QUERY + ' | detected_level=~"(?i)(warn|warning|error|fatal|critical)"'
 INGEST_DELAY_S = 3
+MAX_LINES_PER_POLL = 20_000
+PAGE = 5000
+GRADUATE_AFTER = timedelta(hours=6)  # a template or fingerprint around this long is no longer "new"
+SNAPSHOT_KEY = "log_detector"
+SNAPSHOT_EVERY_S = 60
+SILENCE_ADAPT = timedelta(minutes=10)
+VOLUME_BURST_FLOOR = 600  # lines/min a quiet service's volume baseline may still grow by per minute
 
 FRAME_RE = re.compile(r'File "(?P<file>[^"]+)", line \d+, in (?P<func>\S+)')
 
@@ -129,7 +148,14 @@ class LogDetector:
         self.volume: dict[str, Counter] = {s: Counter() for s in SERVICES}
         self.cursor: datetime | None = None
         self.learning = True
-        self.lines_seen = 0
+        self.lines_seen = 0  # every line the services wrote (counted by Loki)
+        self.lines_parsed = 0  # WARN+ lines Sherlog read and mined
+        self.lines_dropped = 0  # WARN+ lines skipped when a poll overflowed
+        self.restored = False
+        # WARN+ lines that read like instructions to an AI, whether or not their
+        # template is new: a repeated injection must not slip through.
+        self.suspicious: deque = deque(maxlen=100)
+        self._last_snapshot = utcnow()
         self._silence_ticks: dict[str, int] = {s: 0 for s in SERVICES}
         self._quiet_ticks: dict[str, int] = {}
         self._last_rotate = utcnow()
@@ -142,8 +168,7 @@ class LogDetector:
             return
         when = datetime.fromtimestamp(int(ts_ns) / 1e9, tz=timezone.utc)
         level = LEVELS.get((stream.get("severity_text") or stream.get("detected_level") or "INFO").upper(), 1)
-        self.lines_seen += 1
-        self.volume[service].add()
+        self.lines_parsed += 1
 
         result = self.miners[service].add_log_message(line)
         template_id = f"{service}:{result['cluster_id']}"
@@ -154,6 +179,9 @@ class LogDetector:
         template.text = result["template_mined"]
         template.level = max(template.level, level)
         template.counter.add()
+        hit = looks_like_injection(line)
+        if hit:
+            self.suspicious.append({"ts": when, "service": service, "match": hit, "line": line[:200]})
         if len(template.examples) < 3 or level >= 2:
             template.examples.append({"ts": when.isoformat(), "line": line[:300], "trace_id": stream.get("trace_id")})
 
@@ -179,24 +207,50 @@ class LogDetector:
             if stream.get("trace_id"):
                 exc.trace_ids.append(stream["trace_id"])
 
+    async def _count(self, start: datetime, end: datetime) -> int:
+        """Lines per service in [start, end), counted inside Loki."""
+        window_ms = max(1, int((end - start).total_seconds() * 1000))
+        result = await loki.query(f"sum by (service_name) (count_over_time({QUERY}[{window_ms}ms]))", at=end)
+        total = 0
+        for row in result:
+            service = row["metric"].get("service_name")
+            if service in self.volume:
+                n = int(float(row["value"][1]))
+                self.volume[service].add(n)
+                total += n
+        self.lines_seen += total
+        return total
+
     async def _pull(self, start: datetime, end: datetime) -> int:
-        """Read [start, end) page by page; returns the number of lines ingested."""
-        ingested = 0
+        """Count [start, end) and read its WARN+ lines page by page; returns the lines parsed."""
+        await self._count(start, end)
+        parsed = 0
         while start < end:
-            streams = await loki.query_range(QUERY, start, end, limit=5000, direction="forward")
+            streams = await loki.query_range(WARN_QUERY, start, end, limit=PAGE, direction="forward")
             entries = sorted(
                 ((ts, stream["stream"], line) for stream in streams for ts, line in stream["values"]),
                 key=lambda entry: int(entry[0]),
             )
             for ts, stream, line in entries:
                 self._ingest(stream, ts, line)
-            ingested += len(entries)
-            if len(entries) < 5000:
+            parsed += len(entries)
+            if len(entries) < PAGE:
                 break
             start = datetime.fromtimestamp(int(entries[-1][0]) / 1e9, tz=timezone.utc) + timedelta(microseconds=1)
-        return ingested
+            if parsed >= MAX_LINES_PER_POLL:
+                # Don't fall behind: count what is left and move on. Rates stay
+                # far above any threshold, so spikes are still detected.
+                left = await loki.query(
+                    f"sum(count_over_time({WARN_QUERY}[{max(1, int((end - start).total_seconds() * 1000))}ms]))", at=end
+                )
+                self.lines_dropped += int(float(left[0]["value"][1])) if left else 0
+                break
+        return parsed
 
     # ------------------------------------------------------------ detection
+    def _counters(self) -> list[Counter]:
+        return [*self.volume.values(), *(t.counter for t in self.templates.values()), *(e.counter for e in self.exceptions.values())]
+
     def _rotate(self) -> None:
         for counter in [t.counter for t in self.templates.values()] + [e.counter for e in self.exceptions.values()] + list(
             self.volume.values()
@@ -213,8 +267,18 @@ class LogDetector:
             if not self._is_alerting(f"exc:{exc.fingerprint}"):
                 exc.counter.baseline.update(exc.counter.per_minute)
         for service, counter in self.volume.items():
-            if not self._is_alerting(f"silence:{service}"):
-                counter.baseline.update(counter.per_minute)
+            silence = bus.active.get(f"silence:{service}")
+            # A silence alert freezes the baseline, but not forever: after
+            # SILENCE_ADAPT, the lower volume is accepted as the new normal.
+            if silence is None or now - silence.started_at >= SILENCE_ADAPT:
+                # Winsorized: a burst counts as at most 3x the usual volume, so a
+                # few minutes of log flood can't make normal volume look like silence.
+                mean = counter.baseline.mean
+                cap = None if mean is None else max(3 * mean, mean + VOLUME_BURST_FLOOR)
+                counter.baseline.update(counter.per_minute if cap is None else min(counter.per_minute, cap))
+        for item in [*self.templates.values(), *self.exceptions.values()]:
+            if not item.learned and now - item.first_seen >= GRADUATE_AFTER:
+                item.learned = True  # around for hours: part of normal now, alert on spikes only
 
     @staticmethod
     def _is_alerting(key: str) -> bool:
@@ -292,16 +356,28 @@ class LogDetector:
         start = end - timedelta(seconds=settings.learning_s)
         # Walk history minute by minute so baselines see realistic per-minute counts.
         cursor = start
+        minutes: dict[int, list[int]] = {}
+        counters: dict[int, Counter] = {}
+        learned = 0
         while cursor < end:
             step_end = min(cursor + timedelta(minutes=1), end)
             try:
                 await self._pull(cursor, step_end)
             except Exception as exc:  # noqa: BLE001
                 log.warning("Learning pull failed: %r", exc)
+            for counter in self._counters():
+                counters[id(counter)] = counter
+                minutes.setdefault(id(counter), [0] * learned).append(counter.per_minute)
+            learned += 1
+            self._close_minute(step_end)  # fold this minute in, then start the next one empty
             for _ in range(BUCKETS_PER_MIN):
                 self._rotate()
-            self._close_minute(step_end)
             cursor = step_end
+        # Every baseline starts from a low quantile of its learned minutes, so a
+        # log flood or an incident inside the learning window doesn't set what
+        # "normal" means (and hide the next incident).
+        for key, values in minutes.items():
+            counters[key].baseline.mean = float(sorted(values)[len(values) // 4])
         self.cursor = end
         self.learning = False
         log.info(
@@ -310,7 +386,8 @@ class LogDetector:
         )
 
     async def run(self) -> None:
-        await self.learn()
+        if not await self.restore():
+            await self.learn()
         while True:
             await asyncio.sleep(settings.log_poll_s)
             now = utcnow()
@@ -328,8 +405,122 @@ class LogDetector:
                 self._close_minute(now)
                 self._last_minute = now
             self._evaluate()
+            if (now - self._last_snapshot).total_seconds() >= SNAPSHOT_EVERY_S:
+                await self.save()
+                self._last_snapshot = now
+
+    def stats(self) -> dict:
+        return {
+            "lines_seen": self.lines_seen,
+            "lines_parsed": self.lines_parsed,
+            "lines_dropped": self.lines_dropped,
+            "lag_s": round((utcnow() - self.cursor).total_seconds(), 1) if self.cursor else None,
+            "templates": len(self.templates),
+            "exception_fingerprints": len(self.exceptions),
+            "restored_from_snapshot": self.restored,
+        }
+
+    # ------------------------------------------------------------ snapshots
+    def snapshot(self) -> dict:
+        def counter(c: Counter) -> dict:
+            b = c.baseline
+            return {"buckets": list(c.buckets), "total": c.total, "mean": b.mean, "var": b.var, "samples": b.samples}
+
+        return {
+            "version": 1,
+            "cursor": self.cursor.isoformat() if self.cursor else None,
+            "lines_seen": self.lines_seen,
+            "lines_parsed": self.lines_parsed,
+            "lines_dropped": self.lines_dropped,
+            "miners": {s: jsonpickle.dumps(m.drain, keys=True) for s, m in self.miners.items()},
+            "volume": {s: counter(c) for s, c in self.volume.items()},
+            "templates": [
+                {
+                    "id": t.id, "service": t.service, "text": t.text, "level": t.level,
+                    "first_seen": t.first_seen.isoformat(), "learned": t.learned, "counter": counter(t.counter),
+                    "examples": list(t.examples), "history": list(t.history),
+                }
+                for t in self.templates.values()
+            ],
+            "exceptions": [
+                {
+                    "fingerprint": e.fingerprint, "service": e.service, "type": e.type, "message": e.message,
+                    "frames": e.frames, "stack": e.stack, "version": e.version, "first_seen": e.first_seen.isoformat(),
+                    "learned": e.learned, "counter": counter(e.counter), "trace_ids": list(e.trace_ids),
+                }
+                for e in self.exceptions.values()
+            ],
+        }
+
+    def load(self, state: dict) -> None:
+        def counter(data: dict) -> Counter:
+            c = Counter()
+            c.buckets.extend(data["buckets"])
+            c.total = data["total"]
+            c.baseline.mean, c.baseline.var, c.baseline.samples = data["mean"], data["var"], data["samples"]
+            return c
+
+        for service, encoded in state["miners"].items():
+            if service in self.miners:
+                drain = jsonpickle.loads(encoded, keys=True)
+                miner = self.miners[service].drain
+                miner.id_to_cluster = {int(k): v for k, v in drain.id_to_cluster.items()}
+                miner.clusters_counter = drain.clusters_counter
+                miner.root_node = drain.root_node
+        for service, data in state["volume"].items():
+            if service in self.volume:
+                self.volume[service] = counter(data)
+        for t in state["templates"]:
+            self.templates[t["id"]] = Template(
+                t["id"], t["service"], t["text"], t["level"], datetime.fromisoformat(t["first_seen"]), t["learned"],
+                counter(t["counter"]), deque(t["examples"], maxlen=3), deque(map(tuple, t["history"]), maxlen=60),
+            )
+        for e in state["exceptions"]:
+            self.exceptions[e["fingerprint"]] = Exception_(
+                e["fingerprint"], e["service"], e["type"], e["message"], e["frames"], e["stack"], e["version"],
+                datetime.fromisoformat(e["first_seen"]), e["learned"], counter(e["counter"]),
+                deque(e["trace_ids"], maxlen=5),
+            )
+        self.lines_seen, self.lines_parsed = state["lines_seen"], state["lines_parsed"]
+        self.lines_dropped = state.get("lines_dropped", 0)
+        self.cursor = datetime.fromisoformat(state["cursor"]) if state["cursor"] else None
+
+    async def save(self) -> None:
+        try:
+            await db.put_setting(SNAPSHOT_KEY, self.snapshot())
+        except Exception as exc:  # noqa: BLE001 - a missed snapshot only costs a longer catch-up
+            log.warning("Could not snapshot the log detector: %s", exc)
+
+    async def restore(self) -> bool:
+        """Resume from the last snapshot if it is recent enough to catch up from."""
+        try:
+            state = await db.get_setting(SNAPSHOT_KEY)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Could not read the log detector snapshot: %s", exc)
+            return False
+        if not state or not state.get("cursor"):
+            return False
+        gap = utcnow() - datetime.fromisoformat(state["cursor"])
+        if gap > timedelta(seconds=settings.learning_s):
+            log.info("Snapshot is %s old; relearning instead", gap)
+            return False
+        self.load(state)
+        self.restored = True
+        self.learning = False
+        self._last_rotate = self._last_minute = utcnow()
+        log.info(
+            "Resumed from snapshot (%d templates, %d fingerprints); catching up %.0f s of logs",
+            len(self.templates), len(self.exceptions), gap.total_seconds(),
+        )
+        return True
 
     # ------------------------------------------------------------ queries
+    def suspicious_in(self, services: set[str], since: datetime) -> dict | None:
+        """The latest instruction-like WARN+ line from these services since `since`."""
+        return next(
+            (s for s in reversed(self.suspicious) if s["service"] in services and s["ts"] >= since), None
+        )
+
     def interesting_templates(self, services: set[str] | None = None) -> list[dict]:
         """WARN/ERROR templates that are new or above their usual rate, for the evidence funnel."""
         rows = []
