@@ -9,7 +9,25 @@ the system actually recovered.
 Built for the **Meta Global AI Developer Hackathon** (Cerebral Valley) —
 Indie Developer track, *Push the Frontier*.
 
-> **Status:** work in progress. This README grows phase by phase.
+**Demo video (3 min):** https://youtu.be/hTfWTZvWnM0 ·
+**A pull request Sherlog opened on its own:** [Killkanacode/sherlog-shop#1](https://github.com/Killkanacode/sherlog-shop/pull/1)
+
+### At a glance
+
+| | |
+|---|---|
+| Failure scenarios detected | **15 / 15**, each as exactly one incident, 0 false positives in 10 fault-free minutes |
+| Root causes with live Meta models | **4 / 4** correct on service, category and action; median **78 s** to diagnosis, **$0.39** for all four |
+| Code fix for a bad deploy | Muse Code writes the fix and a regression test; Sherlog proves the test fails on the deploy and passes with the fix, then opens a PR, in under a minute for about $0.10 |
+| Log volume | At 20,000 log lines/s Sherlog processes about 19: its cost follows errors, not volume |
+
+### Meta's models, and why each one
+
+| Model | Where it runs | Role |
+|---|---|---|
+| **Muse Spark** | Meta Model API | The investigator. It reasons over noisy evidence, chains calls to ten read-only tools and returns a strict `json_schema` diagnosis, so every action comes from a validated schema, not free text |
+| **Muse Spark Open** | Baseten (open weights) | Triage, the high-volume first pass. Logs are sensitive data, so this part can run on infrastructure you control |
+| **Muse Code** | `muse exec`, headless, in an isolated container | The fixer. It writes the code fix and a regression test for a bad deploy, in its sandbox, and Sherlog checks the work before opening the PR |
 
 ## What's in the repo
 
@@ -217,6 +235,30 @@ curl -s -H "$AUTH" localhost:8200/incidents/<id>/postmortem                 # Ma
 curl -s -H "$AUTH" -X PUT localhost:8200/settings -H 'content-type: application/json' -d '{"autonomy":"L2","dry_run":false}'  # admin
 ```
 
+## Code fixes (Muse Code)
+
+A rollback stops the bleeding; the code fix is what lasts. When the diagnosis
+is `bad_deploy_code_bug`, Sherlog sends the fixer (`fixer/`) the deploy's
+diff, the service's exceptions and the code exactly as deployed. That is only
+`demo-app/` at that version, with no git history, so nothing hints at the
+answer. In its own container, Muse Code (`muse exec`) runs:
+
+- in its bubblewrap sandbox, with restricted network and no web tools;
+- with `--output-schema` and a step limit;
+- as an unprivileged user that never sees the GitHub token.
+
+Then the fixer checks the work itself, in a separate sandbox with no network:
+
+- only the service's code and tests changed;
+- the new test passes with the fix;
+- the same test fails on the deployed code.
+
+Only then does it open a pull request in the shop's repository
+(`DEMO_APP_REPO`) through the GitHub API. The PR's base is a branch holding the
+code as deployed, so its diff is only the fix. Every step shows up in the
+incident timeline and in the console's "Code fix" panel. Set `FIXER_DRY_RUN=true`
+to run everything except the pull request.
+
 ## Web console
 
 Everything above can be done from the browser at http://localhost:8300:
@@ -386,6 +428,7 @@ Everything in this repository was written during the hackathon (Oct 27 – Nov 4
 - Sherlog's detection pipeline: metric, log, exception and container detectors, incident grouping, topology, evidence funnel and root-cause hint, plus the detection benchmark.
 - The model layer, triage, the tool-calling investigator with its ten tools, and diagnosis scoring in the benchmark.
 - Actions with autonomy levels and dry run, the verification loop with automatic revert and re-investigation, incident memory and postmortems.
+- The fixer: Muse Code in a sandboxed container, independent verification of its test, and pull requests through the GitHub API.
 - The web console: Live, Incident, Chaos Lab, Postmortems, Settings and How it works, with live streaming.
 - Production hardening: Loki-side log filtering and counting, warm restarts from snapshots, model budget, breaker, queue and redaction, access control with roles, sessions and audit, and action guardrails, with load, security and end-to-end checks.
 
