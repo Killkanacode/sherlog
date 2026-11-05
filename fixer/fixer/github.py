@@ -40,7 +40,8 @@ class GitHub:
 
     async def check(self) -> str:
         """The default branch's head commit; fails if the repo is missing, empty or not writable."""
-        repo = await self._call("GET", "", ok=(200,))
+        # Absolute URL: with an empty path httpx adds a trailing slash, and GitHub answers 404.
+        repo = await self._call("GET", f"{API}/repos/{self.repo}", ok=(200,))
         if not (repo.get("permissions") or {}).get("push"):
             raise GitHubError(f"the token can't push to {self.repo}")
         ref = await self._call("GET", f"/git/ref/heads/{repo['default_branch']}", ok=(200,))

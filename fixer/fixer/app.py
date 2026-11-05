@@ -341,7 +341,8 @@ async def attempt(job: dict, body: Job, work: Path) -> None:
         return
     job["state"] = "opening_pr"
     files = {p: ((workspace / p).read_bytes() if (workspace / p).exists() else None) for p in changed}
-    title = f"Fix {body.service}: {first_sentence(job['muse_summary']) or cause.get('summary', '')[:60]}"
+    # A fixed shape: the model's summary is long and goes in the body.
+    title = f"Fix {body.service} bug shipped in deploy {body.version} (incident #{body.incident_id})"
     pr = await github.open_pr(
         body.version, deployed, files, f"sherlog/fix-incident-{body.incident_id}-{secrets.token_hex(2)}",
         title[:100], pr_body(body, job),
@@ -355,11 +356,6 @@ async def attempt(job: dict, body: Job, work: Path) -> None:
 
 def status_of(porcelain: str, path: str) -> str:
     return next((line[:2] for line in porcelain.splitlines() if line[3:].strip().strip('"').endswith(path)), "")
-
-
-def first_sentence(text: str) -> str:
-    sentence = re.split(r"(?<=[.!?])\s", text.strip(), maxsplit=1)[0].rstrip(".")
-    return sentence if len(sentence) <= 70 else ""
 
 
 def pr_body(body: Job, job: dict) -> str:
